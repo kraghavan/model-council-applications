@@ -1,13 +1,13 @@
-# PR Council 🏛️
+# Model Council 🏛️
 
-A multi-model AI council for reviewing pull requests. Get perspectives from Claude, Gemini, and local Ollama models — then aggregate their verdicts.
+A framework for running multiple AI models on the same task and aggregating their verdicts.
 
-## Why Multiple Models?
+## Why?
 
 - **Different blind spots** — models catch different issues
-- **Confidence through consensus** — if all agree, you can trust it more
-- **Interesting disagreements** — split verdicts surface areas needing human attention
-- **Cost flexibility** — use local models for simple PRs, cloud for complex ones
+- **Confidence through consensus** — agreement = higher trust
+- **Surface disagreements** — split verdicts need human attention
+- **Cost flexibility** — mix local and cloud models
 
 ## Quick Start
 
@@ -16,30 +16,19 @@ git clone https://github.com/kraghavan/model-council-applications.git
 cd model-council-applications
 cp .env.example .env        # Add your API keys
 pip install -e .
-council review https://github.com/owner/repo/pull/123
+council pr-review https://github.com/owner/repo/pull/123
 ```
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.10+
-- GitHub Personal Access Token ([create one](https://github.com/settings/tokens))
-- At least one of:
-  - [Anthropic API key](https://console.anthropic.com/)
-  - [Google AI API key](https://makersuite.google.com/app/apikey)
-  - [Ollama](https://ollama.ai/) running locally
-
-### Setup
-
 ```bash
-# Clone the repo
+# Clone
 git clone https://github.com/kraghavan/model-council-applications.git
 cd model-council-applications
 
-# Create virtual environment (recommended)
+# Virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # Install
 pip install -e .
@@ -51,135 +40,146 @@ cp .env.example .env
 
 ## Configuration
 
-Edit `.env` with your settings:
+Edit `.env`:
 
 ```bash
-# Required
+# Required for PR review
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 
-# At least one model API key
+# At least one model (or Ollama running locally)
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 GOOGLE_API_KEY=AI-xxxxx
 
-# Optional: Ollama (if running locally)
+# Ollama (optional)
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 
-# Which models to use
+# Settings
 COUNCIL_MODELS=claude,gemini,ollama
-
-# Score threshold for approval (0.0-1.0)
 APPROVAL_THRESHOLD=0.7
 ```
 
 ## Usage
 
-### Review a PR
+### PR Review
 
 ```bash
-# Basic usage
-council review https://github.com/owner/repo/pull/123
+# Full URL
+council pr-review https://github.com/owner/repo/pull/123
 
-# Short format works too
-council review owner/repo#123
+# Short format
+council pr-review owner/repo#123
 
-# Specify models
-council review https://github.com/owner/repo/pull/123 --models claude,gemini
+# Specific models
+council pr-review owner/repo#123 --models claude,gemini
 
-# JSON output (for CI/scripts)
-council review https://github.com/owner/repo/pull/123 --json
+# JSON output
+council pr-review owner/repo#123 --json
 ```
 
-### Check available models
+### Check Models
 
 ```bash
 council models
 ```
 
+## Available Tasks
+
+| Task | Description | Status |
+|------|-------------|--------|
+| `pr-review` | Review GitHub pull requests | ✅ Ready |
+| `doc-review` | Review documents | 🔜 Planned |
+| `architecture` | Evaluate design decisions | 🔜 Planned |
+| `explain` | Explain code with multiple perspectives | 🔜 Planned |
+
 ## How It Works
 
 ```
-┌─────────────┐
-│  PR URL     │
-└──────┬──────┘
-       │
-       ▼
-┌──────────────┐
-│ Fetch Diff   │◄── GitHub API
-└──────┬───────┘
-       │
-  ┌────┴────┬────────┐
-  ▼         ▼        ▼
-Claude   Gemini   Ollama
-  │         │        │
-  └────┬────┴────────┘
-       │
- ┌─────▼─────┐
- │ Aggregate │──► Weighted scores
- └─────┬─────┘    Consensus level
-       │          Key issues
-       ▼
- ┌───────────┐
- │  Verdict  │──► APPROVE / REQUEST_CHANGES / COMMENT
- └───────────┘
+┌──────────┐
+│  Input   │  (PR URL, document, code, etc.)
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│   Task   │  (defines prompt, schema, aggregation)
+└────┬─────┘
+     │
+  ┌──┴──┬──────┐
+  ▼     ▼      ▼
+Claude Gemini Ollama   ← parallel execution
+  │     │      │
+  └──┬──┴──────┘
+     │
+┌────▼─────┐
+│  Voting  │  (consensus, scores, key issues)
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│ Verdict  │  (APPROVE / REQUEST_CHANGES / COMMENT)
+└──────────┘
 ```
 
-### Scoring
+## Adding a New Task
 
-Each model scores the PR from 0.0 to 1.0:
+Create `council/tasks/my_task.py`:
 
-| Score | Meaning |
-|-------|---------|
-| 0.9 - 1.0 | Excellent, ready to merge |
-| 0.7 - 0.9 | Good, minor issues only |
-| 0.5 - 0.7 | Needs work |
-| 0.3 - 0.5 | Major concerns |
-| 0.0 - 0.3 | Critical issues |
+```python
+from council.tasks.base import BaseTask, TaskResult
 
-### Consensus Levels
+class MyTask(BaseTask):
+    name = "my-task"
+    description = "What this task does"
+    
+    async def fetch_input(self, source: str) -> dict:
+        """Fetch/parse the input data."""
+        ...
+    
+    def build_prompt(self, input_data: dict) -> tuple[str, str]:
+        """Return (system_prompt, user_prompt)."""
+        ...
+    
+    def parse_response(self, model_name: str, response: str) -> TaskResult:
+        """Parse model's response into structured result."""
+        ...
+    
+    def aggregate(self, results: list[TaskResult]) -> dict:
+        """Combine all model results into final verdict."""
+        ...
+```
 
-- **Full** — All models agree on the verdict
-- **Partial** — Majority agrees
-- **Split** — No clear majority
+Register in `council/tasks/__init__.py`:
+
+```python
+from council.tasks.my_task import MyTask
+TASKS = {"my-task": MyTask, ...}
+```
 
 ## Example Output
 
 ```
-🤖 Council members: claude, gemini, ollama
+🤖 Council: claude, gemini, ollama/llama3.2
 
-📋 Reviewing: Add user authentication
+📋 Task: pr-review
    https://github.com/owner/repo/pull/123
-   Author: developer | main ← feature/auth
 
-╭─────────────────────────────────────────╮
-│ ✅ APPROVE — Score: 85% (full consensus)│
-╰─────────────────────────────────────────╯
+╭──────────────────────────────────────────────╮
+│ ✅ APPROVE — Score: 85% (full consensus)     │
+╰──────────────────────────────────────────────╯
 
-Individual Reviews:
-  ✅ claude (87%): Well-structured auth implementation...
-  ✅ gemini (84%): Good security practices, consider...
-  ✅ ollama/llama3.2 (83%): Clean code, tests look good...
+Individual Results:
+  ✅ claude (87%): Well-structured implementation...
+  ✅ gemini (84%): Good practices, minor suggestions...
+  ✅ ollama/llama3.2 (83%): Clean code, tests pass...
 
 Key Issues:
-┌──────────┬─────────────────┬─────────────────────────┬───────────┐
-│ Severity │ File            │ Issue                   │ Flagged By│
-├──────────┼─────────────────┼─────────────────────────┼───────────┤
-│ minor    │ auth/session.py │ Consider adding timeout │ claude    │
-│ nit      │ tests/test_auth │ Missing edge case test  │ gemini    │
-└──────────┴─────────────────┴─────────────────────────┴───────────┘
+┌──────────┬─────────────┬────────────────────────┐
+│ Severity │ Location    │ Issue                  │
+├──────────┼─────────────┼────────────────────────┤
+│ minor    │ auth.py:42  │ Consider adding timeout│
+│ nit      │ tests/      │ Missing edge case      │
+└──────────┴─────────────┴────────────────────────┘
 ```
-
-## Roadmap
-
-- [ ] GitHub Action for automated reviews
-- [ ] Post review comments directly to PR
-- [ ] Webhook server for real-time reviews
-- [ ] Track model accuracy over time
-- [ ] Custom review criteria per repo
-
-## Contributing
-
-Contributions welcome! Please open an issue first to discuss.
 
 ## License
 

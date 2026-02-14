@@ -1,4 +1,4 @@
-"""Command-line interface for PR Council."""
+"""Command-line interface for Model Council."""
 
 import asyncio
 import sys
@@ -10,206 +10,212 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from council.config import get_settings
-from council.github import fetch_pull_request
-from council.models import get_reviewer, ReviewResult
-from council.aggregator import aggregate_reviews, CouncilVerdict
+from council.core.runner import run_council
+from council.core.voting import aggregate_results, Verdict
+from council.tasks import get_task, list_tasks
 
 console = Console()
 
 
-def format_verdict(verdict: CouncilVerdict) -> None:
-    """Pretty print the council verdict."""
-    # Header
-    color = {"APPROVE": "green", "REQUEST_CHANGES": "red", "COMMENT": "yellow"}.get(
-        verdict.verdict, "white"
-    )
+def format_verdict(verdict: Verdict, task_name: str) -> None:
+    """Pretty print the verdict."""
+    color = {
+        "APPROVE": "green",
+        "REQUEST_CHANGES": "red",
+        "COMMENT": "yellow",
+        "REJECT": "red",
+        "ERROR": "red",
+    }.get(verdict.decision, "white")
     
     console.print()
     console.print(Panel(
-        f"[bold {color}]{verdict.emoji} {verdict.verdict}[/] — Score: {verdict.score:.0%} ({verdict.consensus} consensus)",
-        title="[bold]Council Verdict[/]",
+        f"[bold {color}]{verdict.emoji} {verdict.decision}[/] — "
+        f"Score: {verdict.score:.0%} ({verdict.consensus} consensus)",
+        title=f"[bold]Council Verdict: {task_name}[/]",
         border_style=color,
     ))
     
-    # Individual reviews
-    console.print("\n[bold]Individual Reviews:[/]")
-    for review in verdict.individual_reviews:
-        if review.error:
-            console.print(f"  ❌ [red]{review.model_name}[/]: {review.error}")
+    # Individual results
+    console.print("\n[bold]Individual Results:[/]")
+    for result in verdict.results:
+        if result.error:
+            console.print(f"  ⚠️  [red]{result.model_name}[/]: {result.error}")
         else:
             emoji = {"APPROVE": "✅", "REQUEST_CHANGES": "🔴", "COMMENT": "💬"}.get(
-                review.verdict, "❓"
+                result.decision, "❓"
             )
-            console.print(f"  {emoji} [cyan]{review.model_name}[/] ({review.score:.0%}): {review.summary[:100]}...")
+            summary = result.summary[:80] + "..." if len(result.summary) > 80 else result.summary
+            console.print(f"  {emoji} [cyan]{result.model_name}[/] ({result.score:.0%}): {summary}")
     
     # Issues table
-    if verdict.key_issues:
+    if verdict.issues:
         console.print("\n[bold]Key Issues:[/]")
         table = Table(show_header=True, header_style="bold")
         table.add_column("Severity", width=10)
-        table.add_column("File", width=30)
-        table.add_column("Issue", width=50)
-        table.add_column("Flagged By", width=20)
+        table.add_column("Location", width=25)
+        table.add_column("Issue", width=45)
+        table.add_column("Flagged By", width=15)
         
-        severity_colors = {
-            "critical": "red",
-            "major": "yellow", 
-            "minor": "cyan",
-            "nit": "dim",
-        }
+        colors = {"critical": "red", "major": "yellow", "minor": "cyan", "nit": "dim"}
         
-        for issue in verdict.key_issues[:10]:
-            color = severity_colors.get(issue["severity"], "white")
+        for issue in verdict.issues[:10]:
+            sev = issue.get("severity", "minor")
+            loc = issue.get("file") or "-"
+            if issue.get("line"):
+                loc = f"{loc}:{issue['line']}"
             table.add_row(
-                f"[{color}]{issue['severity']}[/]",
-                issue.get("file") or "-",
-                issue["description"][:50],
-                ", ".join(issue["raised_by"]),
+                f"[{colors.get(sev, 'white')}]{sev}[/]",
+                loc[:25],
+                issue.get("description", "")[:45],
+                ", ".join(issue.get("raised_by", []))[:15],
             )
         
         console.print(table)
 
 
-async def run_review(pr_url: str, models: list[str]) -> CouncilVerdict:
-    """Run the council review process."""
+async def execute_task(task_name: str, source: str, models: list[str]) -> Verdict:
+    """Execute a task and return the verdict."""
     settings = get_settings()
+    task = get_task(task_name)
     
-    # Fetch PR
-    with console.status("[bold blue]Fetching PR from GitHub..."):
-        pr = await fetch_pull_request(pr_url)
+    # Fetch input
+    with console.status(f"[bold blue]Fetching input for {task_name}..."):
+        input_data = await task.fetch_input(source)
     
-    console.print(f"📋 Reviewing: [bold]{pr.title}[/]")
-    console.print(f"   {pr.url}")
-    console.print(f"   Author: {pr.author} | {pr.base} ← {pr.head}")
+    # Display task info
+    if task_name == "pr-review" and "title" in input_data:
+        console.print(f"📋 [bold]{input_data['title']}[/]")
+        console.print(f"   {input_data.get('url', source)}")
+        console.print(f"   Author: {input_data.get('author', 'unknown')} | "
+                     f"{input_data.get('base', '?')} ← {input_data.get('head', '?')}")
+    else:
+        console.print(f"📋 Input: {source}")
     console.print()
     
-    pr_info = {
-        "title": pr.title,
-        "body": pr.body,
-        "author": pr.author,
-        "base": pr.base,
-        "head": pr.head,
-    }
-    
-    # Run reviews in parallel
-    reviewers = [get_reviewer(m) for m in models]
-    
-    async def review_with_status(reviewer) -> ReviewResult:
-        return await reviewer.review(pr_info, pr.diff)
-    
+    # Run council
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        tasks = []
-        for reviewer in reviewers:
-            task = progress.add_task(f"[cyan]{reviewer.name}[/] reviewing...", total=None)
-            tasks.append((task, reviewer))
+        for model in models:
+            progress.add_task(f"[cyan]{model}[/] analyzing...", total=None)
         
-        # Run all reviews concurrently
-        results = await asyncio.gather(
-            *[review_with_status(r) for _, r in tasks],
-            return_exceptions=True,
-        )
-        
-        # Convert exceptions to error results
-        final_results = []
-        for (_, reviewer), result in zip(tasks, results):
-            if isinstance(result, Exception):
-                final_results.append(ReviewResult.from_error(reviewer.name, str(result)))
-            else:
-                final_results.append(result)
+        results = await run_council(task, input_data, models)
     
     # Aggregate
-    return aggregate_reviews(final_results, settings.approval_threshold)
+    return aggregate_results(results, settings.approval_threshold)
 
 
 @click.group()
-@click.version_option()
+@click.version_option(package_name="model-council")
 def main():
-    """PR Council - AI-powered pull request reviews."""
+    """Model Council - Multi-model AI consensus framework."""
     pass
 
 
-@main.command()
+@main.command("pr-review")
 @click.argument("pr_url")
-@click.option(
-    "--models", "-m",
-    help="Comma-separated list of models (default: from config)",
-)
-@click.option(
-    "--json", "output_json",
-    is_flag=True,
-    help="Output raw JSON instead of formatted output",
-)
-def review(pr_url: str, models: str | None, output_json: bool):
-    """Review a pull request with the AI council.
+@click.option("--models", "-m", help="Comma-separated list of models")
+@click.option("--json", "output_json", is_flag=True, help="Output JSON")
+def pr_review(pr_url: str, models: str | None, output_json: bool):
+    """Review a GitHub pull request.
     
-    PR_URL: GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
+    PR_URL: GitHub PR URL or owner/repo#number
     """
+    _run_task("pr-review", pr_url, models, output_json)
+
+
+@main.command("run")
+@click.argument("task_name")
+@click.argument("source")
+@click.option("--models", "-m", help="Comma-separated list of models")
+@click.option("--json", "output_json", is_flag=True, help="Output JSON")
+def run_task(task_name: str, source: str, models: str | None, output_json: bool):
+    """Run any registered task.
+    
+    TASK_NAME: Name of the task (see 'council tasks')
+    SOURCE: Input source for the task
+    """
+    _run_task(task_name, source, models, output_json)
+
+
+def _run_task(task_name: str, source: str, models_str: str | None, output_json: bool):
+    """Internal task runner."""
     settings = get_settings()
     
-    # Determine which models to use
-    if models:
-        model_list = [m.strip().lower() for m in models.split(",")]
+    # Get models
+    if models_str:
+        models = [m.strip().lower() for m in models_str.split(",")]
     else:
-        model_list = settings.validate_api_keys()
+        models = settings.get_available_models()
     
-    if not model_list:
-        console.print("[red]Error:[/] No models available. Check your API keys in .env")
+    if not models:
+        console.print("[red]Error:[/] No models available. Check API keys in .env")
         sys.exit(1)
     
-    console.print(f"🤖 Council members: [bold]{', '.join(model_list)}[/]\n")
+    console.print(f"🤖 Council: [bold]{', '.join(models)}[/]\n")
     
     try:
-        verdict = asyncio.run(run_review(pr_url, model_list))
+        verdict = asyncio.run(execute_task(task_name, source, models))
         
         if output_json:
             import json
             output = {
+                "task": task_name,
                 "score": verdict.score,
-                "verdict": verdict.verdict,
+                "decision": verdict.decision,
                 "consensus": verdict.consensus,
-                "issues": verdict.key_issues,
-                "reviews": [
+                "issues": verdict.issues,
+                "results": [
                     {
                         "model": r.model_name,
                         "score": r.score,
-                        "verdict": r.verdict,
+                        "decision": r.decision,
                         "summary": r.summary,
                         "error": r.error,
                     }
-                    for r in verdict.individual_reviews
+                    for r in verdict.results
                 ],
             }
             console.print_json(json.dumps(output))
         else:
-            format_verdict(verdict)
+            format_verdict(verdict, task_name)
             
+    except ValueError as e:
+        console.print(f"[red]Error:[/] {e}")
+        sys.exit(1)
     except Exception as e:
         console.print(f"[red]Error:[/] {e}")
         sys.exit(1)
 
 
-@main.command()
-def models():
-    """List available models and their status."""
+@main.command("tasks")
+def show_tasks():
+    """List available tasks."""
+    console.print("[bold]Available Tasks:[/]\n")
+    for task in list_tasks():
+        console.print(f"  • [cyan]{task['name']}[/] — {task['description']}")
+
+
+@main.command("models")
+def show_models():
+    """Show configured models and their status."""
     settings = get_settings()
-    available = settings.validate_api_keys()
+    available = settings.get_available_models()
     
-    console.print("[bold]Available Models:[/]\n")
+    console.print("[bold]Model Status:[/]\n")
     
     all_models = ["claude", "gemini", "ollama"]
     for model in all_models:
         if model in available:
-            console.print(f"  ✅ [green]{model}[/] - configured")
+            console.print(f"  ✅ [green]{model}[/] — ready")
         elif model in settings.enabled_models:
-            console.print(f"  ❌ [red]{model}[/] - enabled but missing API key")
+            console.print(f"  ❌ [red]{model}[/] — enabled but missing API key")
         else:
-            console.print(f"  ⬜ [dim]{model}[/] - not enabled")
+            console.print(f"  ⬜ [dim]{model}[/] — not enabled")
     
-    console.print(f"\n[dim]Enabled in config: {settings.council_models}[/]")
+    console.print(f"\n[dim]Config: COUNCIL_MODELS={settings.council_models}[/]")
 
 
 if __name__ == "__main__":

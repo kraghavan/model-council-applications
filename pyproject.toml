@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pr-council"
+name = "model-council"
 version = "0.1.0"
-description = "Multi-model AI council for reviewing pull requests"
+description = "Multi-model AI council framework for consensus-based task execution"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "you@example.com"}
+    {name = "Karthik Raghavan"}
 ]
-keywords = ["ai", "code-review", "llm", "github", "pull-request"]
+keywords = ["ai", "llm", "multi-model", "ensemble", "code-review", "claude", "gemini", "ollama"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -46,8 +46,8 @@ dev = [
 council = "council.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/you/pr-council"
-Repository = "https://github.com/you/pr-council"
+Homepage = "https://github.com/kraghavan/model-council-applications"
+Repository = "https://github.com/kraghavan/model-council-applications"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -56,3 +56,6 @@ include = ["council*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
