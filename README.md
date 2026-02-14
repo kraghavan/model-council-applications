@@ -1,13 +1,13 @@
 # Model Council 🏛️
 
-A framework for running multiple AI models on the same task and aggregating their verdicts.
+A framework for running multiple AI models on the same task and aggregating their verdicts. Get consensus from Claude, Gemini, and local Ollama models.
 
-## Why?
+## Why Multiple Models?
 
 - **Different blind spots** — models catch different issues
 - **Confidence through consensus** — agreement = higher trust
 - **Surface disagreements** — split verdicts need human attention
-- **Cost flexibility** — mix local and cloud models
+- **Cost flexibility** — mix cloud APIs with local models
 
 ## Quick Start
 
@@ -21,6 +21,17 @@ council pr-review https://github.com/owner/repo/pull/123
 
 ## Installation
 
+### Prerequisites
+
+- Python 3.10+
+- [GitHub Personal Access Token](https://github.com/settings/tokens) (for PR review)
+- At least one of:
+  - [Anthropic API key](https://console.anthropic.com/)
+  - [Google AI API key](https://makersuite.google.com/app/apikey)
+  - [Ollama](https://ollama.ai/) running locally
+
+### Setup
+
 ```bash
 # Clone
 git clone https://github.com/kraghavan/model-council-applications.git
@@ -28,7 +39,7 @@ cd model-council-applications
 
 # Virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install
 pip install -e .
@@ -36,6 +47,18 @@ pip install -e .
 # Configure
 cp .env.example .env
 # Edit .env with your API keys
+```
+
+### Optional: Ollama Setup (Local Models)
+
+```bash
+# Install - https://ollama.ai
+brew install ollama        # Mac
+# or download from ollama.ai
+
+# Start server & pull model
+ollama serve
+ollama pull llama3.2       # In another terminal
 ```
 
 ## Configuration
@@ -46,113 +69,37 @@ Edit `.env`:
 # Required for PR review
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 
-# At least one model (or Ollama running locally)
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-GOOGLE_API_KEY=AI-xxxxx
+# At least one model API key
+ANTHROPIC_API_KEY=sk-ant-xxxxx   # https://console.anthropic.com/
+GOOGLE_API_KEY=AI-xxxxx          # https://makersuite.google.com/
 
-# Ollama (optional)
+# Optional: Ollama
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 
 # Settings
-COUNCIL_MODELS=claude,gemini,ollama
-APPROVAL_THRESHOLD=0.7
+COUNCIL_MODELS=claude,gemini,ollama  # Which models to use
+APPROVAL_THRESHOLD=0.7               # Score threshold (0.0-1.0)
 ```
 
 ## Usage
 
-### PR Review
-
 ```bash
-# Full URL
-council pr-review https://github.com/owner/repo/pull/123
+# Check configured models
+council models
 
-# Short format
+# Review a PR (various URL formats work)
+council pr-review https://github.com/owner/repo/pull/123
 council pr-review owner/repo#123
 
-# Specific models
+# Specify models
 council pr-review owner/repo#123 --models claude,gemini
 
-# JSON output
+# JSON output (for scripts/CI)
 council pr-review owner/repo#123 --json
-```
 
-### Check Models
-
-```bash
-council models
-```
-
-## Available Tasks
-
-| Task | Description | Status |
-|------|-------------|--------|
-| `pr-review` | Review GitHub pull requests | ✅ Ready |
-| `doc-review` | Review documents | 🔜 Planned |
-| `architecture` | Evaluate design decisions | 🔜 Planned |
-| `explain` | Explain code with multiple perspectives | 🔜 Planned |
-
-## How It Works
-
-```
-┌──────────┐
-│  Input   │  (PR URL, document, code, etc.)
-└────┬─────┘
-     │
-     ▼
-┌──────────┐
-│   Task   │  (defines prompt, schema, aggregation)
-└────┬─────┘
-     │
-  ┌──┴──┬──────┐
-  ▼     ▼      ▼
-Claude Gemini Ollama   ← parallel execution
-  │     │      │
-  └──┬──┴──────┘
-     │
-┌────▼─────┐
-│  Voting  │  (consensus, scores, key issues)
-└────┬─────┘
-     │
-     ▼
-┌──────────┐
-│ Verdict  │  (APPROVE / REQUEST_CHANGES / COMMENT)
-└──────────┘
-```
-
-## Adding a New Task
-
-Create `council/tasks/my_task.py`:
-
-```python
-from council.tasks.base import BaseTask, TaskResult
-
-class MyTask(BaseTask):
-    name = "my-task"
-    description = "What this task does"
-    
-    async def fetch_input(self, source: str) -> dict:
-        """Fetch/parse the input data."""
-        ...
-    
-    def build_prompt(self, input_data: dict) -> tuple[str, str]:
-        """Return (system_prompt, user_prompt)."""
-        ...
-    
-    def parse_response(self, model_name: str, response: str) -> TaskResult:
-        """Parse model's response into structured result."""
-        ...
-    
-    def aggregate(self, results: list[TaskResult]) -> dict:
-        """Combine all model results into final verdict."""
-        ...
-```
-
-Register in `council/tasks/__init__.py`:
-
-```python
-from council.tasks.my_task import MyTask
-TASKS = {"my-task": MyTask, ...}
+# List available tasks
+council tasks
 ```
 
 ## Example Output
@@ -160,8 +107,9 @@ TASKS = {"my-task": MyTask, ...}
 ```
 🤖 Council: claude, gemini, ollama/llama3.2
 
-📋 Task: pr-review
+📋 Add user authentication
    https://github.com/owner/repo/pull/123
+   Author: developer | main ← feature/auth
 
 ╭──────────────────────────────────────────────╮
 │ ✅ APPROVE — Score: 85% (full consensus)     │
@@ -181,6 +129,84 @@ Key Issues:
 └──────────┴─────────────┴────────────────────────┘
 ```
 
+## Architecture
+
+```
+┌──────────┐
+│  Input   │  (PR URL, document, code, etc.)
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│   Task   │  (defines prompt, schema, aggregation)
+└────┬─────┘
+     │
+  ┌──┴──┬──────┐
+  ▼     ▼      ▼
+Claude Gemini Ollama   ← parallel execution
+  │     │      │
+  └──┬──┴──────┘
+     │
+┌────▼─────┐
+│  Voting  │  (consensus, scores, issues)
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│ Verdict  │  (APPROVE / REQUEST_CHANGES / COMMENT)
+└──────────┘
+```
+
+## Project Structure
+
+```
+model-council-applications/
+├── council/
+│   ├── core/              # Generic, reusable
+│   │   ├── models.py      # Claude, Gemini, Ollama clients
+│   │   ├── runner.py      # Parallel execution
+│   │   └── voting.py      # Consensus/aggregation logic
+│   ├── tasks/             # Pluggable applications
+│   │   ├── base.py        # Abstract task interface
+│   │   └── pr_review.py   # PR review implementation
+│   ├── config.py          # Settings from .env
+│   └── cli.py             # Command-line interface
+├── tests/
+├── CLAUDE.md              # Claude Code context
+├── CONTRIBUTING.md        # How to contribute
+└── pyproject.toml
+```
+
+## Fork & Extend
+
+Want to build on this? See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+
+- How to add new tasks
+- How to add new models  
+- Development setup
+- Pull request guidelines
+
+## Available Tasks
+
+| Task | Description | Status |
+|------|-------------|--------|
+| `pr-review` | Review GitHub pull requests | ✅ Ready |
+| `doc-review` | Review documents for clarity | 🔜 Planned |
+| `architecture` | Evaluate design decisions | 🔜 Planned |
+| `explain` | Explain code with multiple perspectives | 🔜 Planned |
+
+## Roadmap
+
+- [ ] GitHub Action for automated PR reviews
+- [ ] Post review comments directly to PR
+- [ ] More tasks: doc review, architecture review
+- [ ] Track model accuracy over time
+- [ ] Custom voting strategies
+
 ## License
 
-MIT
+MIT — fork it, extend it, make it yours.
+
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).

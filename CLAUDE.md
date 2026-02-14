@@ -1,61 +1,71 @@
 # Model Council
 
-A framework for running multiple AI models on the same task and aggregating their responses.
-
-## Project Structure
-
-```
-model-council/
-├── council/
-│   ├── core/           # Generic model runners & voting
-│   │   ├── models.py   # Claude, Gemini, Ollama clients
-│   │   ├── runner.py   # Parallel execution
-│   │   └── voting.py   # Consensus/aggregation
-│   ├── tasks/          # Pluggable applications
-│   │   ├── base.py     # Abstract task interface
-│   │   └── pr_review.py # PR review implementation
-│   └── cli.py          # Entry point
-└── tests/
-```
-
-## Key Concepts
-
-- **Task**: Defines what problem the council solves (input, prompt, schema, aggregation)
-- **Runner**: Executes all models in parallel on a task
-- **Voting**: Combines model responses into a single verdict
-
-## Adding a New Task
-
-1. Create `council/tasks/your_task.py`
-2. Inherit from `BaseTask`
-3. Implement: `fetch_input()`, `build_prompt()`, `parse_response()`, `aggregate()`
-4. Register in `council/tasks/__init__.py`
+Multi-model AI consensus framework. Runs tasks across Claude, Gemini, and Ollama, then aggregates verdicts.
 
 ## Commands
 
 ```bash
-# Install
-pip install -e .
-
-# Run PR review
-council pr-review https://github.com/owner/repo/pull/123
-
-# List available tasks
-council --help
-
-# Check configured models
-council models
+council pr-review <url>      # Review a GitHub PR
+council tasks                # List available tasks
+council models               # Check configured models
+council run <task> <input>   # Run any task
 ```
 
-## Environment Variables
+## Structure
 
-Required in `.env`:
-- `GITHUB_TOKEN` - for PR review task
-- At least one of: `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or Ollama running locally
+```
+council/
+├── core/           # Generic infrastructure (don't modify often)
+│   ├── models.py   # Model clients (Claude, Gemini, Ollama)
+│   ├── runner.py   # Parallel execution
+│   └── voting.py   # Consensus logic
+├── tasks/          # Task implementations (extend here)
+│   ├── base.py     # Abstract interface
+│   └── pr_review.py
+├── config.py       # Settings from .env
+└── cli.py          # Entry point
+```
+
+## Key Files
+
+- `council/tasks/base.py` — `BaseTask` class to inherit from
+- `council/tasks/__init__.py` — Task registry (add new tasks here)
+- `council/core/models.py` — Model clients (add new models here)
+- `.env` — API keys and settings
+
+## Adding a Task
+
+1. Create `council/tasks/new_task.py` inheriting `BaseTask`
+2. Implement: `fetch_input()`, `build_prompt()`, `parse_response()`
+3. Register in `council/tasks/__init__.py`
+
+## Adding a Model
+
+1. Create new `ModelClient` subclass in `council/core/models.py`
+2. Register in `get_model_client()` factory
+3. Add config to `council/config.py` and `.env.example`
+
+## Environment
+
+```bash
+GITHUB_TOKEN=...           # Required for pr-review
+ANTHROPIC_API_KEY=...      # Claude
+GOOGLE_API_KEY=...         # Gemini  
+OLLAMA_HOST=...            # Local Ollama
+COUNCIL_MODELS=claude,gemini,ollama
+```
+
+## Testing
+
+```bash
+pytest                           # Run all tests
+pytest tests/test_core.py       # Core tests
+pytest tests/test_tasks.py      # Task tests
+```
 
 ## Code Style
 
-- Python 3.10+
-- Type hints everywhere
-- Async for all model calls
-- Pydantic for config/validation
+- Python 3.10+, type hints everywhere
+- Async for all model/network calls
+- Pydantic for config validation
+- `ruff` for formatting/linting
