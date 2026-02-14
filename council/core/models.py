@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import anthropic
 import google.generativeai as genai
 import ollama
+from mistralai import Mistral
 
 from council.config import get_settings
 
@@ -122,6 +123,30 @@ class OllamaClient(ModelClient):
         except Exception as e:
             return ModelResponse.from_error(self.name, str(e))
 
+
+class MistralClient(ModelClient):
+    name = "mistral"
+
+    def __init__(self):
+        settings = get_settings()
+        self.client = Mistral(api_key=settings.mistral_api_key)
+        self.model = "mistral-large-latest"  # or mixtral-8x22b
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
+        try:
+            response = await self.client.chat.complete_async(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            return ModelResponse(
+                model_name=self.name,
+                content=response.choices[0].message.content,
+            )
+        except Exception as e:
+            return ModelResponse.from_error(self.name, str(e))
 
 def get_model_client(name: str) -> ModelClient:
     """Factory function to get a model client by name."""
