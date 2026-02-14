@@ -125,6 +125,23 @@ def pr_review(pr_url: str, models: str | None, output_json: bool):
     """
     _run_task("pr-review", pr_url, models, output_json)
 
+@main.command("architecture")
+@click.argument("source")
+@click.option("--models", "-m", help="Comma-separated list of models")
+@click.option("--json", "output_json", is_flag=True, help="Output JSON")
+def architecture(source: str, models: str | None, output_json: bool):
+    """Review system architecture.
+    
+    SOURCE: File path, URL, directory, or raw text
+    
+    Examples:
+        council architecture ./design.md
+        council architecture ./architecture.mermaid
+        council architecture ./my-project/
+        council architecture "Client -> API -> Database"
+    """
+    _run_task("architecture", source, models, output_json)
+
 
 @main.command("run")
 @click.argument("task_name")
