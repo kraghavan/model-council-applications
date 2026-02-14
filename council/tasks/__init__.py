@@ -2,10 +2,12 @@
 
 from council.tasks.base import BaseTask, TaskResult
 from council.tasks.pr_review import PRReviewTask
+from council.tasks.architecture import ArchitectureTask  # Add this
 
 # Registry of available tasks
 TASKS: dict[str, type[BaseTask]] = {
     "pr-review": PRReviewTask,
+    "architecture": ArchitectureTask,  # Add this
 }
 
 
@@ -29,6 +31,7 @@ __all__ = [
     "BaseTask",
     "TaskResult",
     "PRReviewTask",
+    "ArchitectureTask",
     "TASKS",
     "get_task",
     "list_tasks",
