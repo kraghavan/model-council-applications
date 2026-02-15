@@ -2,25 +2,55 @@
 
 ## Description
 
-Run multiple AI models (Claude, Gemini, Ollama) on the same task and aggregate their verdicts. Useful for code review, document analysis, architecture decisions, and any task where multiple perspectives add value.
+Run multiple AI models (Claude, GPT-4o, Gemini, Mistral, DeepSeek, Groq, Ollama) on the same task and aggregate their verdicts. Useful for code review, architecture review, and any task where consensus adds value.
 
 ## When to Use
 
 - Reviewing pull requests with multi-model consensus
-- Getting diverse perspectives on technical decisions  
+- Evaluating system architecture designs
+- Getting diverse perspectives on technical decisions
 - Validating outputs across different models
-- Building ensemble AI workflows
 
 ## Available Tasks
 
 ### pr-review
+
 Review GitHub pull requests with multiple models.
 
 ```bash
 council pr-review https://github.com/owner/repo/pull/123
-council pr-review owner/repo#123
-council pr-review owner/repo#123 --models claude,gemini
+council pr-review owner/repo#123 --models claude,openai,deepseek
 council pr-review owner/repo#123 --json
+```
+
+### architecture
+
+Review system architecture from diagrams, docs, or repo structure.
+
+```bash
+council architecture ./docs/design.md
+council architecture ./architecture.mermaid
+council architecture ./my-project/
+council architecture "Client -> API -> DB"
+```
+
+## Supported Models
+
+| Model | Config Key | Notes |
+|-------|------------|-------|
+| `claude` | `ANTHROPIC_API_KEY` | Anthropic |
+| `openai` | `OPENAI_API_KEY` | GPT-4o |
+| `gemini` | `GOOGLE_API_KEY` | Google |
+| `mistral` | `MISTRAL_API_KEY` | Mistral AI |
+| `deepseek` | `DEEPSEEK_API_KEY` | Cheap |
+| `groq` | `GROQ_API_KEY` | Free tier |
+| `ollama` | No key needed | Local |
+
+## Configuration
+
+```bash
+COUNCIL_MODELS=claude,openai,deepseek
+APPROVAL_THRESHOLD=0.7
 ```
 
 ## Extending
@@ -35,31 +65,11 @@ class MyTask(BaseTask):
     description = "What this task does"
     
     async def fetch_input(self, source: str) -> dict:
-        # Get input data
         ...
     
     def build_prompt(self, input_data: dict) -> tuple[str, str]:
-        # Return (system_prompt, user_prompt)
         ...
     
     def parse_response(self, model_name: str, response: str) -> TaskResult:
-        # Parse model output
         ...
-    
-    def aggregate(self, results: list[TaskResult]) -> dict:
-        # Combine verdicts
-        ...
-```
-
-## Configuration
-
-Set in `.env`:
-
-```bash
-GITHUB_TOKEN=ghp_xxx           # Required for pr-review
-ANTHROPIC_API_KEY=sk-ant-xxx   # Optional
-GOOGLE_API_KEY=AI-xxx          # Optional  
-OLLAMA_HOST=http://localhost:11434
-COUNCIL_MODELS=claude,gemini   # Which models to use
-APPROVAL_THRESHOLD=0.7         # Score threshold
 ```
