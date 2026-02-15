@@ -4,6 +4,43 @@ import pytest
 
 from council.core.voting import aggregate_results, calculate_consensus, Verdict
 from council.tasks.base import TaskResult
+from council.core.runner import run_council
+
+class TestRunner:
+    
+    @pytest.mark.asyncio
+    async def test_run_council_parallel(self):
+        """Verify models run in parallel."""
+        from unittest.mock import MagicMock, AsyncMock, patch
+        from council.tasks import get_task
+        from council.core.models import ModelResponse
+        
+        task = get_task("pr-review")
+        mock_input = {
+            "title": "Test", "body": "", "author": "user",
+            "base": "main", "head": "feature", "diff": "+code",
+            "url": "https://github.com/test/repo/pull/1",
+        }
+        
+        call_times = []
+        
+        async def mock_generate(*args, **kwargs):
+            import asyncio
+            call_times.append(asyncio.get_event_loop().time())
+            await asyncio.sleep(0.1)  # Simulate API latency
+            return ModelResponse("mock", '{"score": 0.8, "verdict": "APPROVE", "summary": "OK", "issues": []}')
+        
+        with patch("council.core.runner.get_model_client") as mock_factory:
+            mock_client = MagicMock()
+            mock_client.generate = mock_generate
+            mock_factory.return_value = mock_client
+            
+            results = await run_council(task, mock_input, ["m1", "m2", "m3"])
+        
+        assert len(results) == 3
+        # All should start at roughly the same time (parallel)
+        if len(call_times) >= 2:
+            assert call_times[-1] - call_times[0] < 0.05  # Started within 50ms
 
 
 class TestCalculateConsensus:

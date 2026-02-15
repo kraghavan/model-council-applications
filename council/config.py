@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # API Keys
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
+    mistral_api_key: str | None = None
+    openai_api_key: str | None = None
+    deepseek_api_key: str | None = None
+    groq_api_key: str | None = None
     github_token: str | None = None
 
     # Ollama
@@ -27,6 +31,10 @@ class Settings(BaseSettings):
     # Model versions
     claude_model: str = "claude-sonnet-4-20250514"
     gemini_model: str = "gemini-1.5-pro"
+    mistral_model: str = "mistral-large-latest"
+    openai_model: str = "gpt-4o"
+    deepseek_model: str = "deepseek-chat"
+    groq_model: str = "llama-3.3-70b-versatile"
 
     # Council configuration
     council_models: str = "claude,gemini"
@@ -40,12 +48,18 @@ class Settings(BaseSettings):
     def get_available_models(self) -> list[str]:
         """Get models that are both enabled and have valid credentials."""
         available = []
-        if "claude" in self.enabled_models and self.anthropic_api_key:
-            available.append("claude")
-        if "gemini" in self.enabled_models and self.google_api_key:
-            available.append("gemini")
-        if "ollama" in self.enabled_models:
-            available.append("ollama")
+        model_keys = {
+            "claude": self.anthropic_api_key,
+            "gemini": self.google_api_key,
+            "mistral": self.mistral_api_key,
+            "openai": self.openai_api_key,
+            "deepseek": self.deepseek_api_key,
+            "groq": self.groq_api_key,
+            "ollama": True,  # No key needed
+        }
+        for model in self.enabled_models:
+            if model in model_keys and model_keys[model]:
+                available.append(model)
         return available
 
 
