@@ -296,9 +296,7 @@ ruff check council/ tests/
 - [x] v1.0 — Multi-model PR review
 - [x] v1.2 — Selective file review
 - [x] v2.0 — Memory DB + deliberation
-- [ ] v2.1 — Vector DB + RAG for similar PRs
-- [ ] v2.2 — Knowledge graph
-- [ ] v3.0 — System-aware reviews
+... 
 
 ## License
 
