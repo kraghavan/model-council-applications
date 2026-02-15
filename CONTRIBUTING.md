@@ -5,8 +5,10 @@ Thanks for your interest! This guide covers forking, extending, and contributing
 ## Quick Links
 
 - [Fork & Setup](#fork--setup)
+- [Development Workflow](#development-workflow)
 - [Adding a New Task](#adding-a-new-task)
 - [Adding a New Model](#adding-a-new-model)
+- [Running Tests](#running-tests)
 - [Pull Request Guidelines](#pull-request-guidelines)
 
 ---
@@ -27,7 +29,7 @@ cd model-council-applications
 ```bash
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install with dev dependencies
 pip install -e ".[dev]"
@@ -37,10 +39,15 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
-### 3. Run Tests
+### 3. Verify Setup
 
 ```bash
-pytest
+# Check installation
+council --help
+council models
+
+# Run tests
+pytest tests/ -v
 ```
 
 ### 4. Keep Your Fork Updated
@@ -53,9 +60,34 @@ git merge upstream/main
 
 ---
 
+## Development Workflow
+
+```bash
+# Create feature branch
+git checkout -b feature/my-feature
+
+# Make changes...
+
+# Run linting
+ruff check council/ tests/
+ruff format council/ tests/
+
+# Run tests
+pytest tests/ -v
+
+# Commit
+git add .
+git commit -m "feat: add my feature"
+
+# Push and create PR
+git push origin feature/my-feature
+```
+
+---
+
 ## Adding a New Task
 
-Tasks are pluggable applications that define what the council reviews.
+Tasks define what the council reviews. Each task specifies how to fetch input, build prompts, and parse responses.
 
 ### Step 1: Create Task File
 
@@ -82,7 +114,7 @@ class YourTask(BaseTask):
         Returns:
             Dictionary with data needed for the prompt
         """
-        # Example: fetch from URL, read file, or just use source directly
+        # Example: read file, fetch URL, or use source directly
         return {
             "content": source,
             "metadata": {},
@@ -139,35 +171,68 @@ from council.tasks.your_task import YourTask
 
 TASKS: dict[str, type[BaseTask]] = {
     "pr-review": PRReviewTask,
-    "your-task": YourTask,  # Add this line
+    "architecture": ArchitectureTask,
+    "your-task": YourTask,  # Add this
 }
 ```
 
-### Step 3: Test It
+### Step 3: Add CLI Command (optional)
 
-```bash
-council your-task "some input"
-council your-task path/to/file.txt
-council your-task https://example.com/something
+Edit `council/cli.py`:
+
+```python
+@main.command("your-task")
+@click.argument("source")
+@click.option("--models", "-m", help="Comma-separated list of models")
+@click.option("--json", "output_json", is_flag=True, help="Output JSON")
+def your_task(source: str, models: str | None, output_json: bool):
+    """Your task description.
+    
+    SOURCE: Input for the task
+    """
+    _run_task("your-task", source, models, output_json)
+```
+
+### Step 4: Add Tests
+
+Create `tests/test_your_task.py`:
+
+```python
+import pytest
+from council.tasks.your_task import YourTask
+
+class TestYourTask:
+    
+    def test_build_prompt(self):
+        task = YourTask()
+        input_data = {"content": "test input", "metadata": {}}
+        system, user = task.build_prompt(input_data)
+        assert "test input" in user
+
+    def test_parse_response(self):
+        task = YourTask()
+        response = '{"score": 0.8, "verdict": "APPROVE", "summary": "Good", "issues": []}'
+        result = task.parse_response("test", response)
+        assert result.score == 0.8
 ```
 
 ### Task Ideas
 
 | Task | Input | Use Case |
 |------|-------|----------|
-| `doc-review` | Markdown/text file | Review documentation for clarity |
-| `architecture` | Design doc URL | Evaluate system design decisions |
-| `explain` | Code file | Get multiple explanations of complex code |
-| `debate` | Proposal text | Generate counterarguments |
+| `doc-review` | Markdown file | Review docs for clarity |
 | `security` | Code diff | Security-focused review |
+| `explain` | Code file | Multi-perspective explanation |
+| `debate` | Proposal | Generate counterarguments |
+| `translate` | Text | Consensus translation |
 
 ---
 
 ## Adding a New Model
 
-### Step 1: Create Client
+### Step 1: Add Client Class
 
-Edit `council/core/models.py`, add a new class:
+Edit `council/core/models.py`:
 
 ```python
 class NewModelClient(ModelClient):
@@ -176,16 +241,19 @@ class NewModelClient(ModelClient):
     name = "newmodel"
 
     def __init__(self):
+        from some_sdk import Client  # Import inside __init__
         settings = get_settings()
-        # Initialize your client
-        self.api_key = settings.newmodel_api_key
-        
+        self.client = Client(api_key=settings.newmodel_api_key)
+        self.model = settings.newmodel_model
+
     async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
         try:
-            # Call your model's API
-            response = await your_api_call(
-                system=system_prompt,
-                prompt=user_prompt,
+            response = await self.client.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
             return ModelResponse(
                 model_name=self.name,
@@ -195,19 +263,15 @@ class NewModelClient(ModelClient):
             return ModelResponse.from_error(self.name, str(e))
 ```
 
-### Step 2: Register the Client
+### Step 2: Register Client
 
-In the same file, update `get_model_client()`:
+In `council/core/models.py`, add to `CLIENTS`:
 
 ```python
-def get_model_client(name: str) -> ModelClient:
-    clients = {
-        "claude": ClaudeClient,
-        "gemini": GeminiClient,
-        "ollama": OllamaClient,
-        "newmodel": NewModelClient,  # Add this
-    }
-    ...
+CLIENTS = {
+    # ... existing clients ...
+    "newmodel": NewModelClient,
+}
 ```
 
 ### Step 3: Add Config
@@ -218,13 +282,69 @@ Edit `council/config.py`:
 class Settings(BaseSettings):
     # ... existing fields ...
     newmodel_api_key: str | None = None
+    newmodel_model: str = "default-model-name"
 ```
 
-Update `.env.example`:
+Update `get_available_models()`:
+
+```python
+model_keys = {
+    # ... existing ...
+    "newmodel": self.newmodel_api_key,
+}
+```
+
+### Step 4: Update Files
+
+Add to `.env.example`:
+```bash
+NEWMODEL_API_KEY=
+NEWMODEL_MODEL=default-model-name
+```
+
+Add to `requirements.txt`:
+```
+newmodel-sdk>=1.0
+```
+
+### Step 5: Add Tests
+
+```python
+class TestNewModelClient:
+    
+    @pytest.mark.asyncio
+    async def test_generate(self):
+        # Mock the SDK and test
+        ...
+```
+
+---
+
+## Running Tests
 
 ```bash
-# New Model
-NEWMODEL_API_KEY=xxx
+# All tests
+pytest tests/ -v
+
+# Specific file
+pytest tests/test_models.py -v
+
+# With coverage
+pytest tests/ --cov=council --cov-report=term-missing
+
+# Only fast tests (no network)
+pytest tests/ -v -m "not slow"
+```
+
+### Test Structure
+
+```
+tests/
+├── test_core.py          # Voting, aggregation
+├── test_models.py        # Model clients
+├── test_tasks.py         # Task parsing (PR review)
+├── test_architecture.py  # Architecture task
+└── test_integration.py   # End-to-end tests
 ```
 
 ---
@@ -234,15 +354,16 @@ NEWMODEL_API_KEY=xxx
 ### Before Submitting
 
 1. **Open an issue first** for major changes
-2. **Run tests**: `pytest`
-3. **Format code**: `ruff format .`
-4. **Check linting**: `ruff check .`
+2. **Run linting**: `ruff check council/ tests/`
+3. **Run tests**: `pytest tests/ -v`
+4. **Update docs** if needed
 
 ### PR Checklist
 
-- [ ] Tests pass
-- [ ] New code has tests (if applicable)
-- [ ] Updated README/docs (if applicable)
+- [ ] Tests pass locally
+- [ ] New code has tests
+- [ ] Linting passes
+- [ ] Docs updated (if applicable)
 - [ ] Descriptive commit messages
 
 ### Commit Style
@@ -252,19 +373,33 @@ feat: add document review task
 fix: handle empty PR descriptions
 docs: update contributing guide
 refactor: simplify voting logic
+test: add integration tests
+chore: update dependencies
 ```
+
+### What Happens on PR
+
+GitHub Actions will automatically:
+1. Run `ruff check` (linting)
+2. Run `pytest` on Python 3.10, 3.11, 3.12
+3. Report coverage
 
 ---
 
 ## Project Philosophy
 
-1. **Simple > Complex** — Easy to understand and extend
-2. **Pluggable** — Tasks and models are independent
-3. **Minimal dependencies** — Only what's needed
-4. **Good defaults** — Works out of the box
+1. **Simple > Complex** — easy to understand and extend
+2. **Pluggable** — tasks and models are independent
+3. **Minimal dependencies** — only what's needed
+4. **Good defaults** — works out of the box
+5. **Test everything** — CI must pass
 
 ---
 
-## Questions?
+## Getting Help
 
-Open an issue or discussion on GitHub!
+- **Questions?** Open a GitHub issue
+- **Bug?** Open an issue with reproduction steps
+- **Feature idea?** Open an issue to discuss first
+
+Thanks for contributing! 🎉

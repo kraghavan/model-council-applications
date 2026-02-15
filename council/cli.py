@@ -50,10 +50,10 @@ def format_verdict(verdict: Verdict, task_name: str) -> None:
     # Issues table
     if verdict.issues:
         console.print("\n[bold]Key Issues:[/]")
-        table = Table(show_header=True, header_style="bold")
+        table = Table(show_header=True, header_style="bold", expand=True)
         table.add_column("Severity", width=10)
-        table.add_column("Location", width=25)
-        table.add_column("Issue", width=45)
+        table.add_column("Location", width=20)
+        table.add_column("Issue", no_wrap=False)  # Auto-width, wrap text
         table.add_column("Flagged By", width=15)
         
         colors = {"critical": "red", "major": "yellow", "minor": "cyan", "nit": "dim"}
@@ -65,12 +65,13 @@ def format_verdict(verdict: Verdict, task_name: str) -> None:
                 loc = f"{loc}:{issue['line']}"
             table.add_row(
                 f"[{colors.get(sev, 'white')}]{sev}[/]",
-                loc[:25],
-                issue.get("description", "")[:45],
-                ", ".join(issue.get("raised_by", []))[:15],
+                loc[:20],
+                issue.get("description", ""),  # Full text
+                ", ".join(issue.get("raised_by", [])),
             )
         
         console.print(table)
+
 
 
 async def execute_task(task_name: str, source: str, models: list[str]) -> Verdict:

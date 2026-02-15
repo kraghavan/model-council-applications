@@ -1,15 +1,16 @@
 # Model Council 🏛️
 
-A framework for running multiple AI models on the same task and aggregating their verdicts. Get consensus from Claude, Gemini, Mistral, and local Ollama models.
+A framework for running multiple AI models on the same task and aggregating their verdicts. Get consensus from Claude, GPT-4o, Gemini, Mistral, DeepSeek, Groq, and local Ollama models.
 
 ## Why Multiple Models?
 
 - **Different blind spots** — models catch different issues
 - **Confidence through consensus** — agreement = higher trust
 - **Surface disagreements** — split verdicts need human attention
-- **Cost flexibility** — mix cloud APIs with local models
+- **Cost flexibility** — mix cloud APIs with free/local models
 
 ## Quick Start
+
 ```bash
 git clone https://github.com/kraghavan/model-council-applications.git
 cd model-council-applications
@@ -24,13 +25,10 @@ council pr-review https://github.com/owner/repo/pull/123
 
 - Python 3.10+
 - [GitHub Personal Access Token](https://github.com/settings/tokens) (for PR review)
-- At least one of:
-  - [Anthropic API key](https://console.anthropic.com/) (Claude)
-  - [Google AI API key](https://makersuite.google.com/app/apikey) (Gemini)
-  - [Mistral API key](https://console.mistral.ai/) (Mistral)
-  - [Ollama](https://ollama.ai/) running locally
+- At least one model API key (see Supported Models below)
 
 ### Setup
+
 ```bash
 # Clone
 git clone https://github.com/kraghavan/model-council-applications.git
@@ -49,6 +47,7 @@ cp .env.example .env
 ```
 
 ### Optional: Ollama Setup (Local Models)
+
 ```bash
 # Install - https://ollama.ai
 brew install ollama        # Mac
@@ -62,40 +61,49 @@ ollama pull llama3.2       # In another terminal
 ## Configuration
 
 Edit `.env`:
+
 ```bash
 # Required for PR review
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 
 # Model API keys (at least one required)
-ANTHROPIC_API_KEY=sk-ant-xxxxx   # https://console.anthropic.com/
-GOOGLE_API_KEY=AIzaSyxxxxx       # https://makersuite.google.com/
-MISTRAL_API_KEY=xxxxx            # https://console.mistral.ai/
+ANTHROPIC_API_KEY=sk-ant-xxxxx   # Claude
+OPENAI_API_KEY=sk-xxxxx          # GPT-4o
+GOOGLE_API_KEY=AIzaSyxxxxx       # Gemini
+MISTRAL_API_KEY=xxxxx            # Mistral
+DEEPSEEK_API_KEY=sk-xxxxx        # DeepSeek (cheap!)
+GROQ_API_KEY=gsk_xxxxx           # Groq (free tier!)
 
-# Optional: Ollama (local)
+# Local models (no API key needed)
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 
-# Settings
-COUNCIL_MODELS=claude,gemini,mistral   # Which models to use
-APPROVAL_THRESHOLD=0.7                  # Score threshold (0.0-1.0)
+# Which models to use
+COUNCIL_MODELS=claude,openai,gemini
+
+# Score threshold for approval (0.0-1.0)
+APPROVAL_THRESHOLD=0.7
 ```
 
 ## Usage
 
 ### Check Models
+
 ```bash
 council models
 ```
 
 ### PR Review
+
 ```bash
 council pr-review https://github.com/owner/repo/pull/123
 council pr-review owner/repo#123
-council pr-review owner/repo#123 --models claude,gemini
+council pr-review owner/repo#123 --models claude,openai,deepseek
 council pr-review owner/repo#123 --json
 ```
 
 ### Architecture Review
+
 ```bash
 # Review a design document
 council architecture ./docs/design.md
@@ -114,37 +122,40 @@ council architecture "Client -> LoadBalancer -> [API1, API2] -> Database"
 ```
 
 ### List Tasks
+
 ```bash
 council tasks
 ```
 
 ## Example Output
+
 ```
-🤖 Council: claude, gemini, mistral
+🤖 Council: claude, openai, deepseek
 
 📋 Add user authentication
    https://github.com/owner/repo/pull/123
    Author: developer | main ← feature/auth
 
 ╭──────────────────────────────────────────────╮
-│ ✅ APPROVE — Score: 85% (full consensus)     │
+│ ✅ APPROVE — Score: 87% (full consensus)     │
 ╰──────────────────────────────────────────────╯
 
 Individual Results:
-  ✅ claude (87%): Well-structured implementation...
-  ✅ gemini (84%): Good practices, minor suggestions...
-  ✅ mistral (83%): Clean code, tests pass...
+  ✅ claude (89%): Well-structured implementation with good error handling...
+  ✅ openai (85%): Clean code, follows best practices...
+  ✅ deepseek (86%): Solid implementation, consider adding rate limiting...
 
 Key Issues:
-┌──────────┬─────────────┬────────────────────────┐
-│ Severity │ Location    │ Issue                  │
-├──────────┼─────────────┼────────────────────────┤
-│ minor    │ auth.py:42  │ Consider adding timeout│
-│ nit      │ tests/      │ Missing edge case      │
-└──────────┴─────────────┴────────────────────────┘
+┌──────────┬─────────────┬────────────────────────────────────────┬───────────┐
+│ Severity │ Location    │ Issue                                  │ Flagged By│
+├──────────┼─────────────┼────────────────────────────────────────┼───────────┤
+│ minor    │ auth.py:42  │ Consider adding request timeout        │ claude    │
+│ nit      │ tests/      │ Missing edge case for expired tokens   │ openai    │
+└──────────┴─────────────┴────────────────────────────────────────┴───────────┘
 ```
 
 ## Architecture
+
 ```
 ┌──────────┐
 │  Input   │  (PR URL, design doc, diagram, repo)
@@ -155,11 +166,11 @@ Key Issues:
 │   Task   │  (pr-review, architecture, etc.)
 └────┬─────┘
      │
-  ┌──┴──┬───────┬──────┐
-  ▼     ▼       ▼      ▼
-Claude Gemini Mistral Ollama  ← parallel execution
-  │     │       │      │
-  └──┬──┴───────┴──────┘
+  ┌──┴───┬───────┬────────┬──────────┬───────┐
+  ▼      ▼       ▼        ▼          ▼       ▼
+Claude OpenAI Gemini DeepSeek     Groq   Ollama
+  │      │       │        │          │       │
+  └──┬───┴───────┴────────┴──────────┴───────┘
      │
 ┌────▼─────┐
 │  Voting  │  (consensus, scores, issues)
@@ -172,50 +183,76 @@ Claude Gemini Mistral Ollama  ← parallel execution
 ```
 
 ## Project Structure
+
 ```
 model-council-applications/
+├── .github/
+│   └── workflows/
+│       └── test.yml       # CI: runs tests on every PR
 ├── council/
-│   ├── core/              # Generic, reusable
-│   │   ├── models.py      # Claude, Gemini, Mistral, Ollama clients
+│   ├── core/
+│   │   ├── models.py      # All model clients
 │   │   ├── runner.py      # Parallel execution
-│   │   └── voting.py      # Consensus/aggregation logic
-│   ├── tasks/             # Pluggable applications
+│   │   └── voting.py      # Consensus/aggregation
+│   ├── tasks/
 │   │   ├── base.py        # Abstract task interface
-│   │   ├── pr_review.py   # PR review implementation
-│   │   └── architecture.py # Architecture review implementation
+│   │   ├── pr_review.py   # PR review task
+│   │   └── architecture.py # Architecture review task
 │   ├── config.py          # Settings from .env
 │   └── cli.py             # Command-line interface
 ├── tests/
+│   ├── test_core.py
+│   ├── test_models.py
+│   ├── test_tasks.py
+│   ├── test_architecture.py
+│   └── test_integration.py
 ├── CLAUDE.md              # Claude Code context
 ├── CONTRIBUTING.md        # How to contribute
 ├── requirements.txt
 └── pyproject.toml
 ```
 
-## Available Tasks
-
-| Task | Description | Status |
-|------|-------------|--------|
-| `pr-review` | Review GitHub pull requests | ✅ Ready |
-| `architecture` | Evaluate system design from diagrams/docs | ✅ Ready |
-| `doc-review` | Review documents for clarity | 🔜 Planned |
-| `explain` | Explain code with multiple perspectives | 🔜 Planned |
-
 ## Supported Models
 
-| Model | Type | API Key From |
-|-------|------|--------------|
-| Claude | Cloud | [console.anthropic.com](https://console.anthropic.com/) |
-| Gemini | Cloud | [makersuite.google.com](https://makersuite.google.com/app/apikey) |
-| Mistral | Cloud | [console.mistral.ai](https://console.mistral.ai/) |
-| Ollama | Local | No key needed, just run `ollama serve` |
+| Model | Provider | Type | Cost | Get API Key |
+|-------|----------|------|------|-------------|
+| Claude | Anthropic | Cloud | $$ | [console.anthropic.com](https://console.anthropic.com/) |
+| GPT-4o | OpenAI | Cloud | $$ | [platform.openai.com](https://platform.openai.com/) |
+| Gemini | Google | Cloud | $ | [aistudio.google.com](https://aistudio.google.com/) |
+| Mistral | Mistral AI | Cloud | $ | [console.mistral.ai](https://console.mistral.ai/) |
+| DeepSeek | DeepSeek | Cloud | ¢ | [platform.deepseek.com](https://platform.deepseek.com/) |
+| Groq | Groq | Cloud | FREE | [console.groq.com](https://console.groq.com/) |
+| Ollama | Local | Local | FREE | [ollama.ai](https://ollama.ai/) |
+
+**Budget-friendly combo:** `COUNCIL_MODELS=deepseek,groq,ollama`
+
+## Available Tasks
+
+| Task | Command | Description | Status |
+|------|---------|-------------|--------|
+| PR Review | `council pr-review <url>` | Review GitHub pull requests | ✅ Ready |
+| Architecture | `council architecture <source>` | Evaluate system design | ✅ Ready |
+| Doc Review | `council doc-review <file>` | Review documentation | 🔜 Planned |
+| Explain | `council explain <code>` | Explain code | 🔜 Planned |
+
+## CI/CD
+
+Every pull request automatically runs:
+- **Linting** with ruff
+- **Tests** on Python 3.10, 3.11, 3.12
+- **Coverage** report
+
+See `.github/workflows/test.yml`
 
 ## Roadmap
 
+- [x] Multi-model PR review
+- [x] Architecture review task
+- [x] GitHub Actions CI
 - [ ] GitHub Action for automated PR reviews
 - [ ] Post review comments directly to PR
 - [ ] More tasks: doc review, code explanation
-- [ ] Image-based architecture diagrams (Claude/Gemini vision)
+- [ ] Web UI dashboard
 - [ ] Custom voting strategies
 
 ## Fork & Extend

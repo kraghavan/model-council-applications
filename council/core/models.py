@@ -1,12 +1,7 @@
-"""Model clients for Claude, Gemini, and Ollama."""
+"""Model clients for Claude, Gemini, Mistral, OpenAI, DeepSeek, Groq, and Ollama."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-
-import anthropic
-import google.generativeai as genai
-import ollama
-from mistralai import Mistral
 
 from council.config import get_settings
 
@@ -14,7 +9,6 @@ from council.config import get_settings
 @dataclass
 class ModelResponse:
     """Response from a model."""
-    
     model_name: str
     content: str
     error: str | None = None
@@ -26,24 +20,21 @@ class ModelResponse:
 
 class ModelClient(ABC):
     """Abstract base class for model clients."""
-
     name: str = "base"
 
     @abstractmethod
     async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
-        """Generate a response from the model."""
         pass
 
 
 class ClaudeClient(ModelClient):
-    """Anthropic Claude client."""
-
     name = "claude"
 
     def __init__(self):
+        import anthropic
         settings = get_settings()
         self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-        self.model = settings.claude_model
+        self.model = settings.get_model_version("claude")
 
     async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
         try:
@@ -53,56 +44,138 @@ class ClaudeClient(ModelClient):
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
-            return ModelResponse(
-                model_name=self.name,
-                content=response.content[0].text,
-            )
-        except anthropic.APIError as e:
-            return ModelResponse.from_error(self.name, f"API error: {e}")
+            return ModelResponse(model_name=self.name, content=response.content[0].text)
         except Exception as e:
             return ModelResponse.from_error(self.name, str(e))
 
 
 class GeminiClient(ModelClient):
-    """Google Gemini client."""
-
     name = "gemini"
 
     def __init__(self):
+        from google import genai
         settings = get_settings()
-        genai.configure(api_key=settings.google_api_key)
-        self.model = genai.GenerativeModel(
-            model_name=settings.gemini_model,
-        )
+        self.client = genai.Client(api_key=settings.google_api_key)
+        self.model = settings.get_model_version("gemini")
 
     async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
         try:
-            # Gemini combines system + user in the prompt
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            response = await self.model.generate_content_async(
-                full_prompt,
-                generation_config=genai.GenerationConfig(
-                    max_output_tokens=4096,
-                    temperature=0.3,
-                ),
+            response = await self.client.aio.models.generate_content(
+                model=self.model,
+                contents=full_prompt,
             )
-            return ModelResponse(
-                model_name=self.name,
-                content=response.text,
+            return ModelResponse(model_name=self.name, content=response.text)
+        except Exception as e:
+            return ModelResponse.from_error(self.name, str(e))
+
+
+class MistralClient(ModelClient):
+    name = "mistral"
+
+    def __init__(self):
+        from mistralai import Mistral
+        settings = get_settings()
+        self.client = Mistral(api_key=settings.mistral_api_key)
+        self.model = settings.get_model_version("mistral")
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
+        try:
+            response = await self.client.chat.complete_async(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
             )
+            return ModelResponse(model_name=self.name, content=response.choices[0].message.content)
+        except Exception as e:
+            return ModelResponse.from_error(self.name, str(e))
+
+
+class OpenAIClient(ModelClient):
+    name = "openai"
+
+    def __init__(self):
+        from openai import AsyncOpenAI
+        settings = get_settings()
+        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.model = settings.get_model_version("openai")
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=4096,
+            )
+            return ModelResponse(model_name=self.name, content=response.choices[0].message.content)
+        except Exception as e:
+            return ModelResponse.from_error(self.name, str(e))
+
+
+class DeepSeekClient(ModelClient):
+    name = "deepseek"
+
+    def __init__(self):
+        from openai import AsyncOpenAI
+        settings = get_settings()
+        self.client = AsyncOpenAI(
+            api_key=settings.deepseek_api_key,
+            base_url="https://api.deepseek.com/v1",
+        )
+        self.model = settings.get_model_version("deepseek")
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=4096,
+            )
+            return ModelResponse(model_name=self.name, content=response.choices[0].message.content)
+        except Exception as e:
+            return ModelResponse.from_error(self.name, str(e))
+
+
+class GroqClient(ModelClient):
+    name = "groq"
+
+    def __init__(self):
+        from groq import AsyncGroq
+        settings = get_settings()
+        self.client = AsyncGroq(api_key=settings.groq_api_key)
+        self.model = settings.get_model_version("groq")
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=4096,
+            )
+            return ModelResponse(model_name=self.name, content=response.choices[0].message.content)
         except Exception as e:
             return ModelResponse.from_error(self.name, str(e))
 
 
 class OllamaClient(ModelClient):
-    """Local Ollama client."""
-
     name = "ollama"
 
     def __init__(self):
+        import ollama
         settings = get_settings()
         self.client = ollama.AsyncClient(host=settings.ollama_host)
-        self.model = settings.ollama_model
+        self.model = settings.get_model_version("ollama")
 
     async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
         try:
@@ -114,47 +187,27 @@ class OllamaClient(ModelClient):
                 ],
                 options={"temperature": 0.3, "num_predict": 4096},
             )
-            return ModelResponse(
-                model_name=f"ollama/{self.model}",
-                content=response["message"]["content"],
-            )
-        except ollama.ResponseError as e:
-            return ModelResponse.from_error(self.name, f"Ollama error: {e}")
+            return ModelResponse(model_name=f"ollama/{self.model}", content=response["message"]["content"])
         except Exception as e:
             return ModelResponse.from_error(self.name, str(e))
 
 
-class MistralClient(ModelClient):
-    name = "mistral"
+CLIENTS = {
+    "claude": ClaudeClient,
+    "gemini": GeminiClient,
+    "mistral": MistralClient,
+    "openai": OpenAIClient,
+    "deepseek": DeepSeekClient,
+    "groq": GroqClient,
+    "ollama": OllamaClient,
+}
 
-    def __init__(self):
-        settings = get_settings()
-        self.client = Mistral(api_key=settings.mistral_api_key)
-        self.model = "mistral-large-latest"  # or mixtral-8x22b
-
-    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
-        try:
-            response = await self.client.chat.complete_async(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            return ModelResponse(
-                model_name=self.name,
-                content=response.choices[0].message.content,
-            )
-        except Exception as e:
-            return ModelResponse.from_error(self.name, str(e))
 
 def get_model_client(name: str) -> ModelClient:
-    """Factory function to get a model client by name."""
-    clients = {
-        "claude": ClaudeClient,
-        "gemini": GeminiClient,
-        "ollama": OllamaClient,
-    }
-    if name not in clients:
-        raise ValueError(f"Unknown model: {name}. Available: {list(clients.keys())}")
-    return clients[name]()
+    if name not in CLIENTS:
+        raise ValueError(f"Unknown model: {name}. Available: {', '.join(CLIENTS.keys())}")
+    return CLIENTS[name]()
+
+
+def list_available_models() -> list[str]:
+    return list(CLIENTS.keys())
