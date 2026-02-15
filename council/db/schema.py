@@ -15,11 +15,19 @@ from pathlib import Path
 from typing import Optional
 
 # Try to import sqlite-vec, gracefully degrade if not available
+# Note: macOS system Python doesn't support enable_load_extension
+SQLITE_VEC_AVAILABLE = False
 try:
+    import sqlite3 as _sqlite3
+    _test_conn = _sqlite3.connect(":memory:")
+    _test_conn.enable_load_extension(True)  # Test if supported
+    _test_conn.close()
+    
     import sqlite_vec
     SQLITE_VEC_AVAILABLE = True
-except ImportError:
-    SQLITE_VEC_AVAILABLE = False
+except (ImportError, AttributeError):
+    # sqlite-vec not installed or extensions not supported (macOS)
+    pass
 
 
 SCHEMA_VERSION = 1
@@ -189,11 +197,14 @@ def init_db(db_path: Optional[str] = None, force: bool = False) -> Path:
     conn = sqlite3.connect(str(path))
     
     try:
-        # Load sqlite-vec extension if available
+        # Load sqlite-vec extension if available (not on macOS system Python)
         if SQLITE_VEC_AVAILABLE:
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
+            try:
+                conn.enable_load_extension(True)
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+            except AttributeError:
+                pass  # Extension loading not supported
         
         cursor = conn.cursor()
         
@@ -255,10 +266,13 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row  # Access columns by name
     
-    # Load sqlite-vec if available
+    # Load sqlite-vec if available (not on macOS system Python)
     if SQLITE_VEC_AVAILABLE:
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
+        try:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+        except AttributeError:
+            pass  # Extension loading not supported
     
     return conn

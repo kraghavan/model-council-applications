@@ -7,3 +7,4 @@ council/core/__pycache__/
 council/tasks/__pycache__/
 council/council.yaml
 model_council.egg-info/
+tmp/test-arch

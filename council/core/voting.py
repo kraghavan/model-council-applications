@@ -116,7 +116,7 @@ def aggregate_results(
     all_issues.sort(key=lambda x: severity_order.get(x.get("severity", ""), 99))
     
     # Build summary
-    summaries = [f"**{r.model_name}** ({r.score:.0%}): {r.summary[:80]}..." for r in valid]
+    summaries = [f"**{r.model_name}** ({r.score:.0%}): {r.summary}" for r in valid]
     if errors:
         summaries.append(f"⚠️ Errors: {', '.join(r.model_name for r in errors)}")
     

@@ -83,7 +83,7 @@ class TestDeliberation:
     @pytest.mark.asyncio
     async def test_multi_round_opinion_change(self, task, mock_input):
         """Test that opinions can change between rounds."""
-        config = DeliberationConfig(rounds=2, storage_enabled=False)
+        config = DeliberationConfig(rounds=2, storage_enabled=False, early_stop_on_consensus=False)
         deliberation = Deliberation(task, ["mock"], config)
         
         # Round 1: COMMENT

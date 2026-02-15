@@ -50,8 +50,7 @@ def format_verdict(result: DeliberationResult, task_name: str) -> None:
             emoji = {"APPROVE": "✅", "REQUEST_CHANGES": "🔴", "COMMENT": "💬"}.get(
                 r.decision, "❓"
             )
-            summary = r.summary[:80] + "..." if len(r.summary) > 80 else r.summary
-            console.print(f"  {emoji} [cyan]{r.model_name}[/] ({r.score:.0%}): {summary}")
+            console.print(f"  {emoji} [cyan]{r.model_name}[/] ({r.score:.0%}): {r.summary}")
     
     # Opinion changes (if multi-round)
     if result.opinion_changes:
@@ -94,7 +93,7 @@ def format_verdict(result: DeliberationResult, task_name: str) -> None:
         console.print("\n[bold]Key Issues:[/]")
         table = Table(show_header=True, header_style="bold", expand=True)
         table.add_column("Severity", width=10)
-        table.add_column("Location", width=20)
+        table.add_column("Location", no_wrap=False)
         table.add_column("Issue", no_wrap=False)
         table.add_column("Flagged By", width=15)
         
@@ -107,7 +106,7 @@ def format_verdict(result: DeliberationResult, task_name: str) -> None:
                 loc = f"{loc}:{issue['line']}"
             table.add_row(
                 f"[{colors.get(sev, 'white')}]{sev}[/]",
-                loc[:20],
+                loc,
                 issue.get("description", ""),
                 ", ".join(issue.get("raised_by", [])),
             )
