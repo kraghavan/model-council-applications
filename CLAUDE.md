@@ -1,108 +1,171 @@
-# Model Council
+# CLAUDE.md
 
-Multi-model AI consensus framework. Runs tasks across Claude, GPT-4o, Gemini, Mistral, DeepSeek, Groq, and Ollama, then aggregates verdicts.
+> Context file for Claude Code and AI assistants working on this project.
 
-## Commands
+## Project Overview
 
-```bash
-council pr-review <url>          # Review a GitHub PR
-council architecture <source>    # Review system design
-council tasks                    # List available tasks
-council models                   # Check configured models
-council run <task> <input>       # Run any task
-```
+**Model Council** is a multi-model AI consensus framework that brings multiple LLMs together to review code and architecture through deliberation.
 
-## Project Structure
+## Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Council** | Multiple AI models reviewing the same content |
+| **Deliberation** | Multi-round review where models read each other's opinions |
+| **Consensus** | Aggregated verdict from all models |
+| **Task** | A specific review type (pr-review, architecture) |
+
+## Architecture
 
 ```
 council/
-├── core/              # Generic infrastructure
-│   ├── models.py      # Model clients (Claude, GPT-4o, Gemini, etc.)
-│   ├── runner.py      # Parallel execution
-│   └── voting.py      # Consensus logic
-├── tasks/             # Task implementations
-│   ├── base.py        # Abstract interface
-│   ├── pr_review.py   # PR review task
-│   └── architecture.py # Architecture review task
-├── config.py          # Settings from .env
-└── cli.py             # Entry point
+├── cli.py              # Click CLI commands
+├── config.py           # Settings (ENV + council.yaml)
+├── core/
+│   ├── models.py       # Model clients (Claude, Gemini, etc.)
+│   ├── runner.py       # Parallel model execution
+│   ├── voting.py       # Consensus aggregation
+│   └── deliberation.py # Multi-round orchestration
+├── db/
+│   ├── schema.py       # SQLite table definitions
+│   └── storage.py      # CRUD operations
+└── tasks/
+    ├── base.py         # Abstract BaseTask
+    ├── pr_review.py    # GitHub PR review
+    └── architecture.py # Architecture review
 ```
 
-## Key Extension Points
+## Database Schema
 
-| To Add | Edit |
-|--------|------|
-| New task | `council/tasks/` + register in `__init__.py` |
-| New model | `council/core/models.py` + `config.py` |
-| CLI command | `council/cli.py` |
+See [docs/SCHEMA.md](docs/SCHEMA.md) for full documentation.
 
-## Supported Models
+**Core tables:**
+- `sources` — Content being reviewed
+- `sessions` — Review sessions
+- `rounds` — Deliberation rounds
+- `round_opinions` — Model opinions per round
+- `verdicts` — Final decisions
+- `observations` — Token/latency tracking
+- `opinion_changes` — How opinions evolved
 
-- `claude` — Anthropic Claude
-- `openai` — OpenAI GPT-4o
-- `gemini` — Google Gemini
-- `mistral` — Mistral AI
-- `deepseek` — DeepSeek (cheap)
-- `groq` — Groq/Llama (free tier)
-- `ollama` — Local models
+## Key Files to Understand
 
-## Environment Variables
+| File | Purpose |
+|------|---------|
+| `council/core/deliberation.py` | Multi-round logic, opinion injection |
+| `council/db/storage.py` | All database operations |
+| `council/tasks/base.py` | Task interface (fetch_input, build_prompt, parse_response) |
+| `council/cli.py` | All CLI commands |
+
+## Adding a New Task
+
+1. Create `council/tasks/my_task.py`:
+```python
+from council.tasks.base import BaseTask, TaskResult
+
+class MyTask(BaseTask):
+    name = "my-task"
+    description = "Does something useful"
+    
+    async def fetch_input(self, source: str, **kwargs) -> dict:
+        # Fetch and prepare input
+        return {"content": "..."}
+    
+    def build_prompt(self, input_data: dict) -> tuple[str, str]:
+        # Return (system_prompt, user_prompt)
+        return "You are...", f"Review: {input_data['content']}"
+    
+    def parse_response(self, model_name: str, response: str) -> TaskResult:
+        # Parse JSON response into TaskResult
+        data = self.parse_json_response(model_name, response)
+        return TaskResult(...)
+```
+
+2. Register in `council/tasks/__init__.py`:
+```python
+from council.tasks.my_task import MyTask
+TASKS["my-task"] = MyTask
+```
+
+## Adding a New Model
+
+1. Add client in `council/core/models.py`:
+```python
+class NewModelClient(ModelClient):
+    name = "newmodel"
+    
+    def __init__(self):
+        settings = get_settings()
+        self.client = ...
+        self.model = settings.get_model_version("newmodel")
+    
+    async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:
+        # Call API and return ModelResponse
+        ...
+
+CLIENTS["newmodel"] = NewModelClient
+```
+
+2. Add config in `council/config.py`:
+```python
+# In Settings class
+newmodel_api_key: Optional[str] = None
+
+# In DEFAULT_CONFIG
+"newmodel": {"version": "model-name"}
+```
+
+## Common Commands
 
 ```bash
-# Required for PR review
-GITHUB_TOKEN=
+# Development
+pip install -e ".[dev]"
+pytest tests/ -v
+ruff check council/
 
-# Model API keys
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-GOOGLE_API_KEY=
-MISTRAL_API_KEY=
-DEEPSEEK_API_KEY=
-GROQ_API_KEY=
-
-# Local
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-
-# Settings
-COUNCIL_MODELS=claude,openai,gemini
-APPROVAL_THRESHOLD=0.7
+# Usage
+council init                          # Initialize DB
+council pr-review owner/repo#123      # Review PR
+council pr-review url --rounds 2      # Multi-round
+council architecture ./docs           # Review architecture
+council history                        # Past reviews
+council stats <session_id>            # Session details
 ```
 
-## Adding a Task
+## Configuration Priority
 
-1. Create `council/tasks/new_task.py` inheriting `BaseTask`
-2. Implement: `fetch_input()`, `build_prompt()`, `parse_response()`
-3. Register in `council/tasks/__init__.py`
-4. Add tests in `tests/test_new_task.py`
+```
+CLI flags > ENV vars > council.yaml > defaults
+```
 
-## Adding a Model
+## Roadmap
 
-1. Create `ModelClient` subclass in `council/core/models.py`
-2. Add to `CLIENTS` dict
-3. Add config in `council/config.py`
-4. Update `.env.example`
-5. Add dependency to `requirements.txt`
+| Version | Features | Status |
+|---------|----------|--------|
+| v1.0.0 | Core multi-model review | ✅ |
+| v1.2.0 | Selective file review | ✅ |
+| v2.0.0 | Memory DB + deliberation | ✅ |
+| v2.1.0 | Vector DB + RAG + Deep Analysis | 📋 |
+| v2.2.0 | Knowledge Graph | 📋 |
+| v3.0.0 | System-Aware AI | 📋 |
 
 ## Testing
 
 ```bash
-pytest tests/ -v                    # All tests
-pytest tests/test_models.py -v      # Model tests
-pytest tests/ --cov=council         # With coverage
+# All tests
+pytest tests/ -v
+
+# Specific test file
+pytest tests/test_storage.py -v
+
+# With coverage
+pytest tests/ --cov=council
 ```
-
-## CI/CD
-
-GitHub Actions runs on every PR:
-- Linting: `ruff check`
-- Tests: `pytest` on Python 3.10, 3.11, 3.12
-- Coverage report
 
 ## Code Style
 
 - Python 3.10+
-- Type hints everywhere
-- Async for all model/network calls
-- Pydantic for config validation
-- `ruff` for formatting/linting
+- Type hints required
+- Async/await for I/O
+- Ruff for linting
+- Dataclasses for models

@@ -264,6 +264,8 @@ Model Council uses SQLite with [sqlite-vec](https://github.com/asg017/sqlite-vec
 - **Observations** — Token usage, latency, costs
 - **Verdicts** — Final consolidated decisions
 
+📖 **See [docs/SCHEMA.md](docs/SCHEMA.md) for full database schema documentation.**
+
 ## Supported Models
 
 | Model | Provider | Requires |
