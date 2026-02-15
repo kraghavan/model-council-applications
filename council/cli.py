@@ -98,6 +98,21 @@ async def execute_task(task_name: str, source: str, models: list[str], file_filt
             total_files = input_data.get("total_files_in_pr", len(files_reviewed))
             if len(files_reviewed) < total_files:
                 console.print(f"   📁 Reviewing [cyan]{len(files_reviewed)}[/] of {total_files} files: {', '.join(files_reviewed)}")
+    
+    elif task_name == "architecture":
+        console.print(f"📐 [bold]Architecture Review[/]")
+        console.print(f"   Source: {input_data.get('source', source)}")
+        console.print(f"   Type: {input_data.get('type', 'unknown')}")
+        
+        # Show files being reviewed
+        if input_data.get("files_reviewed"):
+            files_reviewed = input_data["files_reviewed"]
+            total_files = input_data.get("total_files", len(files_reviewed))
+            if len(files_reviewed) > 0:
+                if total_files > len(files_reviewed):
+                    console.print(f"   📁 Reviewing [cyan]{len(files_reviewed)}[/] of {total_files} files: {', '.join(files_reviewed)}")
+                else:
+                    console.print(f"   📁 Files: {', '.join(files_reviewed)}")
     else:
         console.print(f"📋 Input: {source}")
     console.print()
@@ -152,8 +167,9 @@ def pr_review(pr_url: str, models: str | None, files: str | None, output_json: b
 @main.command("architecture")
 @click.argument("source")
 @click.option("--models", "-m", help="Comma-separated list of models")
+@click.option("--files", "-f", help="Only review these files from directory (comma-separated)")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON")
-def architecture(source: str, models: str | None, output_json: bool):
+def architecture(source: str, models: str | None, files: str | None, output_json: bool):
     """Review system architecture.
     
     SOURCE: File path, URL, directory, or raw text
@@ -162,11 +178,15 @@ def architecture(source: str, models: str | None, output_json: bool):
     
         council architecture ./design.md
         
-        council architecture ./architecture.mermaid
+        council architecture ./docs --files "system.mermaid,api.mermaid"
         
         council architecture ./my-project/
     """
-    _run_task("architecture", source, models, output_json)
+    file_filter = None
+    if files:
+        file_filter = [f.strip() for f in files.split(",")]
+    
+    _run_task("architecture", source, models, output_json, file_filter=file_filter)
 
 
 @main.command("run")
