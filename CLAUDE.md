@@ -164,5 +164,5 @@ pytest tests/ --cov=council
 - Python 3.10+
 - Type hints required
 - Async/await for I/O
-- Ruff for linting
+- Ruff for linting # disabled TBFL
 - Dataclasses for models
