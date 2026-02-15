@@ -1,60 +1,37 @@
 # Model Council Configuration
-# Edit this file to update model versions
+# Copy to council.yaml in your project root or ~/.council/council.yaml
 
+# =============================================================================
+# Models
+# =============================================================================
 models:
-  claude:
-    provider: anthropic
-    default: claude-sonnet-4-20250514
-    alternatives:
-      - claude-opus-4-20250514
-      - claude-haiku-4-20250514
-
-  openai:
-    provider: openai
-    default: gpt-4o
-    alternatives:
-      - gpt-4o-mini
-      - gpt-4-turbo
-
-  gemini:
-    provider: google
-    default: gemini-2.0-flash
-    alternatives:
-      - gemini-1.5-pro-latest
-      - gemini-1.5-flash
-
-  mistral:
-    provider: mistral
-    default: mistral-large-latest
-    alternatives:
-      - mistral-medium-latest
-      - mistral-small-latest
-
-  deepseek:
-    provider: deepseek
-    default: deepseek-chat
-    alternatives:
-      - deepseek-coder
-
-  groq:
-    provider: groq
-    default: llama-3.3-70b-versatile
-    alternatives:
-      - llama-3.1-8b-instant
-      - mixtral-8x7b-32768
-
-  ollama:
-    provider: ollama
-    default: llama3.2
-    alternatives:
-      - mistral
-      - codellama
-
-council:
-  enabled_models:
+  # Which models to use by default (can override with --models flag)
+  default:
     - claude
     - gemini
-  approval_threshold: 0.7
+
+  # Model versions
+  claude:
+    version: claude-sonnet-4-20250514
+  
+  openai:
+    version: gpt-4o
+  
+  gemini:
+    version: gemini-2.0-flash
+  
+  mistral:
+    version: mistral-large-latest
+  
+  deepseek:
+    version: deepseek-chat
+  
+  groq:
+    version: llama-3.3-70b-versatile
+  
+  ollama:
+    version: llama3.2
+    host: http://localhost:11434
 
 # =============================================================================
 # Storage

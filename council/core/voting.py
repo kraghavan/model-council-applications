@@ -16,7 +16,7 @@ class Verdict:
     decision: str
     consensus: str  # full, partial, split, none
     summary: str
-    results: list["TaskResult"]
+    results: list["TaskResult"] = field(default_factory=list)
     issues: list[dict] = field(default_factory=list)
 
     @property

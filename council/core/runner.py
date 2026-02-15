@@ -20,7 +20,8 @@ async def run_single_model(
     response = await client.generate(system_prompt, user_prompt)
     
     if response.error:
-        return task.error_result(model_name, response.error)
+        from council.tasks.base import TaskResult
+        return TaskResult.from_error(model_name, response.error)
     
     return task.parse_response(response.model_name, response.content)
 
@@ -42,10 +43,11 @@ async def run_council(
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
     # Convert exceptions to error results
+    from council.tasks.base import TaskResult
     final_results = []
     for model, result in zip(models, results):
         if isinstance(result, Exception):
-            final_results.append(task.error_result(model, str(result)))
+            final_results.append(TaskResult.from_error(model, str(result)))
         else:
             final_results.append(result)
     

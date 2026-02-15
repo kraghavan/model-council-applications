@@ -174,7 +174,7 @@ class OllamaClient(ModelClient):
     def __init__(self):
         import ollama
         settings = get_settings()
-        self.client = ollama.AsyncClient(host=settings.ollama_host)
+        self.client = ollama.AsyncClient(host=settings.get_ollama_host())
         self.model = settings.get_model_version("ollama")
 
     async def generate(self, system_prompt: str, user_prompt: str) -> ModelResponse:

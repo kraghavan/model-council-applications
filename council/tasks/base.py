@@ -4,6 +4,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -16,7 +17,7 @@ class TaskResult:
     summary: str
     issues: list[dict] = field(default_factory=list)
     extras: dict = field(default_factory=dict)
-    error: str | None = None
+    error: Optional[str] = None
 
     @classmethod
     def from_error(cls, model_name: str, error: str) -> "TaskResult":
@@ -44,11 +45,12 @@ class BaseTask(ABC):
     description: str = "Base task"
 
     @abstractmethod
-    async def fetch_input(self, source: str) -> dict:
+    async def fetch_input(self, source: str, **kwargs) -> dict:
         """Fetch and prepare input data from the source.
         
         Args:
             source: Input source (URL, file path, text, etc.)
+            **kwargs: Additional arguments (e.g., file_filter)
             
         Returns:
             Dictionary with input data for the task
