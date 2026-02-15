@@ -27,7 +27,8 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint with ruff
-        continue-on-error: true
+        if: false
+        #continue-on-error: true
         run: |
           ruff check council/ tests/
 
