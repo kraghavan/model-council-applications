@@ -145,10 +145,7 @@ CLI flags > ENV vars > council.yaml > defaults
 | v1.0.0 | Core multi-model review | ✅ |
 | v1.2.0 | Selective file review | ✅ |
 | v2.0.0 | Memory DB + deliberation | ✅ |
-| v2.1.0 | Vector DB + RAG + Deep Analysis | 📋 |
-| v2.2.0 | Knowledge Graph | 📋 |
-| v3.0.0 | System-Aware AI | 📋 |
-
+...
 ## Testing
 
 ```bash
