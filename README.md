@@ -15,7 +15,7 @@ A framework for running multiple AI models on the same task and aggregating thei
 git clone https://github.com/kraghavan/model-council-applications.git
 cd model-council-applications
 cp .env.example .env        # Add your API keys
-pip install -e .
+pip install -r requirements.txt
 council pr-review https://github.com/owner/repo/pull/123
 ```
 
@@ -39,7 +39,7 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install
-pip install -e .
+pip install -r requirements.txt
 
 # Configure
 cp .env.example .env
