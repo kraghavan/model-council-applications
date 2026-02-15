@@ -1,6 +1,7 @@
 """Pull Request review task implementation."""
 
 import re
+from pathlib import Path
 
 import httpx
 
@@ -14,11 +15,12 @@ class PRReviewTask(BaseTask):
     name = "pr-review"
     description = "Review GitHub pull requests for code quality, bugs, and best practices"
 
-    async def fetch_input(self, source: str) -> dict:
+    async def fetch_input(self, source: str, file_filter: list[str] | None = None) -> dict:
         """Fetch PR data from GitHub.
         
         Args:
             source: PR URL (full URL or owner/repo#number format)
+            file_filter: Optional list of files to review (exits if not in PR)
         """
         owner, repo, number = self._parse_pr_url(source)
         settings = get_settings()
@@ -43,12 +45,37 @@ class PRReviewTask(BaseTask):
             diff_headers = {**headers, "Accept": "application/vnd.github.v3.diff"}
             diff_response = await client.get(pr_url, headers=diff_headers)
             diff_response.raise_for_status()
-            diff = diff_response.text
+            full_diff = diff_response.text
+        
+        # Parse files changed
+        files_in_pr = self._parse_files_from_diff(full_diff)
+        
+        # Apply file filter if specified
+        if file_filter:
+            diff, filtered_files, missing_files = self._filter_diff(full_diff, file_filter, files_in_pr)
             
-            # Truncate large diffs
-            max_chars = 50000
-            if len(diff) > max_chars:
-                diff = diff[:max_chars] + "\n\n... [truncated] ..."
+            if missing_files:
+                missing_str = ", ".join(missing_files)
+                available_str = ", ".join(files_in_pr) if files_in_pr else "(none)"
+                raise ValueError(
+                    f"Files not in PR: {missing_str}\n\n"
+                    f"Files in this PR: {available_str}"
+                )
+            
+            if not filtered_files:
+                available_str = ", ".join(files_in_pr) if files_in_pr else "(none)"
+                raise ValueError(
+                    f"No matching files found.\n\n"
+                    f"Files in this PR: {available_str}"
+                )
+        else:
+            diff = full_diff
+            filtered_files = files_in_pr
+        
+        # Truncate large diffs
+        max_chars = 50000
+        if len(diff) > max_chars:
+            diff = diff[:max_chars] + "\n\n... [truncated] ..."
         
         return {
             "owner": owner,
@@ -61,7 +88,80 @@ class PRReviewTask(BaseTask):
             "head": pr_data["head"]["ref"],
             "url": pr_data["html_url"],
             "diff": diff,
+            "files_reviewed": filtered_files,
+            "total_files_in_pr": len(files_in_pr),
         }
+
+    def _parse_files_from_diff(self, diff: str) -> list[str]:
+        """Extract list of files from a unified diff."""
+        files = []
+        for line in diff.split("\n"):
+            if line.startswith("diff --git"):
+                # Extract b/path from "diff --git a/path b/path"
+                match = re.search(r"b/(.+)$", line)
+                if match:
+                    files.append(match.group(1))
+        return files
+
+    def _filter_diff(
+        self, 
+        diff: str, 
+        file_filter: list[str], 
+        files_in_pr: list[str]
+    ) -> tuple[str, list[str], list[str]]:
+        """Filter diff to only include specified files.
+        
+        Args:
+            diff: Full unified diff
+            file_filter: List of file patterns to include
+            files_in_pr: List of files actually in the PR
+        
+        Returns:
+            Tuple of (filtered_diff, matched_files, missing_files)
+        """
+        def matches_filter(filepath: str, filters: list[str]) -> bool:
+            """Check if filepath matches any filter (supports partial matches)."""
+            for f in filters:
+                # Exact match
+                if f == filepath:
+                    return True
+                # Filename match (without path)
+                if Path(filepath).name == f:
+                    return True
+                # Partial/contains match
+                if f in filepath:
+                    return True
+                # Ends with match
+                if filepath.endswith(f):
+                    return True
+            return False
+        
+        # Find which filters match files in PR
+        matched_files = [f for f in files_in_pr if matches_filter(f, file_filter)]
+        
+        # Find which filters don't match anything
+        missing_files = []
+        for f in file_filter:
+            if not any(matches_filter(pf, [f]) for pf in files_in_pr):
+                missing_files.append(f)
+        
+        # Split diff into per-file chunks and filter
+        chunks = re.split(r"(?=diff --git)", diff)
+        
+        filtered_chunks = []
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            # Extract filename from chunk
+            match = re.search(r"diff --git a/.+ b/(.+)", chunk)
+            if match:
+                filename = match.group(1)
+                if matches_filter(filename, file_filter):
+                    filtered_chunks.append(chunk)
+        
+        filtered_diff = "".join(filtered_chunks)
+        
+        return filtered_diff, matched_files, missing_files
 
     def _parse_pr_url(self, url: str) -> tuple[str, str, int]:
         """Parse PR URL into (owner, repo, number)."""
@@ -90,6 +190,17 @@ class PRReviewTask(BaseTask):
 
     def build_prompt(self, input_data: dict) -> tuple[str, str]:
         """Build PR review prompts."""
+        # Show which files are being reviewed
+        files_info = ""
+        if input_data.get("files_reviewed"):
+            files_reviewed = input_data["files_reviewed"]
+            total_files = input_data.get("total_files_in_pr", len(files_reviewed))
+            
+            if len(files_reviewed) < total_files:
+                files_info = f"\n**Reviewing:** {', '.join(files_reviewed)} ({len(files_reviewed)} of {total_files} files)"
+            else:
+                files_info = f"\n**Files:** {', '.join(files_reviewed)}"
+        
         system_prompt = """You are an expert code reviewer participating in a council of AI reviewers.
 Your job is to analyze pull requests and provide honest, constructive feedback.
 
@@ -108,7 +219,7 @@ Be direct and specific. Respond ONLY with valid JSON."""
 ## Pull Request
 - **Title:** {input_data['title']}
 - **Author:** {input_data['author']}
-- **Branch:** {input_data['base']} ← {input_data['head']}
+- **Branch:** {input_data['base']} ← {input_data['head']}{files_info}
 - **Description:** {input_data['body'] or 'No description'}
 
 ## Diff
@@ -150,7 +261,6 @@ Scoring:
         if data is None:
             return TaskResult.from_error(model_name, "Could not parse JSON response")
         
-        # Parse issues
         issues = []
         for issue in data.get("issues", []):
             issues.append({

@@ -53,7 +53,7 @@ def format_verdict(verdict: Verdict, task_name: str) -> None:
         table = Table(show_header=True, header_style="bold", expand=True)
         table.add_column("Severity", width=10)
         table.add_column("Location", width=20)
-        table.add_column("Issue", no_wrap=False)  # Auto-width, wrap text
+        table.add_column("Issue", no_wrap=False)
         table.add_column("Flagged By", width=15)
         
         colors = {"critical": "red", "major": "yellow", "minor": "cyan", "nit": "dim"}
@@ -66,22 +66,24 @@ def format_verdict(verdict: Verdict, task_name: str) -> None:
             table.add_row(
                 f"[{colors.get(sev, 'white')}]{sev}[/]",
                 loc[:20],
-                issue.get("description", ""),  # Full text
+                issue.get("description", ""),
                 ", ".join(issue.get("raised_by", [])),
             )
         
         console.print(table)
 
 
-
-async def execute_task(task_name: str, source: str, models: list[str]) -> Verdict:
+async def execute_task(task_name: str, source: str, models: list[str], file_filter: list[str] | None = None) -> Verdict:
     """Execute a task and return the verdict."""
     settings = get_settings()
     task = get_task(task_name)
     
-    # Fetch input
+    # Fetch input with optional file filter
     with console.status(f"[bold blue]Fetching input for {task_name}..."):
-        input_data = await task.fetch_input(source)
+        if file_filter and hasattr(task, 'fetch_input'):
+            input_data = await task.fetch_input(source, file_filter=file_filter)
+        else:
+            input_data = await task.fetch_input(source)
     
     # Display task info
     if task_name == "pr-review" and "title" in input_data:
@@ -89,6 +91,13 @@ async def execute_task(task_name: str, source: str, models: list[str]) -> Verdic
         console.print(f"   {input_data.get('url', source)}")
         console.print(f"   Author: {input_data.get('author', 'unknown')} | "
                      f"{input_data.get('base', '?')} ← {input_data.get('head', '?')}")
+        
+        # Show filtered files info
+        if input_data.get("files_reviewed"):
+            files_reviewed = input_data["files_reviewed"]
+            total_files = input_data.get("total_files_in_pr", len(files_reviewed))
+            if len(files_reviewed) < total_files:
+                console.print(f"   📁 Reviewing [cyan]{len(files_reviewed)}[/] of {total_files} files: {', '.join(files_reviewed)}")
     else:
         console.print(f"📋 Input: {source}")
     console.print()
@@ -105,7 +114,7 @@ async def execute_task(task_name: str, source: str, models: list[str]) -> Verdic
         results = await run_council(task, input_data, models)
     
     # Aggregate
-    return aggregate_results(results, settings.approval_threshold)
+    return aggregate_results(results, settings.threshold)
 
 
 @click.group()
@@ -118,13 +127,27 @@ def main():
 @main.command("pr-review")
 @click.argument("pr_url")
 @click.option("--models", "-m", help="Comma-separated list of models")
+@click.option("--files", "-f", help="Only review these files (comma-separated). Exits if file not in PR.")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON")
-def pr_review(pr_url: str, models: str | None, output_json: bool):
+def pr_review(pr_url: str, models: str | None, files: str | None, output_json: bool):
     """Review a GitHub pull request.
     
     PR_URL: GitHub PR URL or owner/repo#number
+    
+    Examples:
+    
+        council pr-review owner/repo#123
+        
+        council pr-review owner/repo#123 --files "auth.py,utils.py"
+        
+        council pr-review owner/repo#123 -f "src/main.py"
     """
-    _run_task("pr-review", pr_url, models, output_json)
+    file_filter = None
+    if files:
+        file_filter = [f.strip() for f in files.split(",")]
+    
+    _run_task("pr-review", pr_url, models, output_json, file_filter=file_filter)
+
 
 @main.command("architecture")
 @click.argument("source")
@@ -136,10 +159,12 @@ def architecture(source: str, models: str | None, output_json: bool):
     SOURCE: File path, URL, directory, or raw text
     
     Examples:
+    
         council architecture ./design.md
+        
         council architecture ./architecture.mermaid
+        
         council architecture ./my-project/
-        council architecture "Client -> API -> Database"
     """
     _run_task("architecture", source, models, output_json)
 
@@ -153,12 +178,13 @@ def run_task(task_name: str, source: str, models: str | None, output_json: bool)
     """Run any registered task.
     
     TASK_NAME: Name of the task (see 'council tasks')
+    
     SOURCE: Input source for the task
     """
     _run_task(task_name, source, models, output_json)
 
 
-def _run_task(task_name: str, source: str, models_str: str | None, output_json: bool):
+def _run_task(task_name: str, source: str, models_str: str | None, output_json: bool, file_filter: list[str] | None = None):
     """Internal task runner."""
     settings = get_settings()
     
@@ -175,7 +201,7 @@ def _run_task(task_name: str, source: str, models_str: str | None, output_json: 
     console.print(f"🤖 Council: [bold]{', '.join(models)}[/]\n")
     
     try:
-        verdict = asyncio.run(execute_task(task_name, source, models))
+        verdict = asyncio.run(execute_task(task_name, source, models, file_filter))
         
         if output_json:
             import json
@@ -224,7 +250,7 @@ def show_models():
     
     console.print("[bold]Model Status:[/]\n")
     
-    all_models = ["claude", "gemini", "ollama"]
+    all_models = ["claude", "gemini", "mistral", "openai", "deepseek", "groq", "ollama"]
     for model in all_models:
         if model in available:
             console.print(f"  ✅ [green]{model}[/] — ready")
