@@ -1,13 +1,14 @@
-"""Task implementations for Model Council."""
+"""Task registry for Model Council."""
 
 from council.tasks.base import BaseTask, TaskResult
 from council.tasks.pr_review import PRReviewTask
-from council.tasks.architecture import ArchitectureTask  # Add this
+from council.tasks.architecture import ArchitectureTask
 
-# Registry of available tasks
+
+# Register all available tasks
 TASKS: dict[str, type[BaseTask]] = {
     "pr-review": PRReviewTask,
-    "architecture": ArchitectureTask,  # Add this
+    "architecture": ArchitectureTask,
 }
 
 
@@ -22,15 +23,15 @@ def get_task(name: str) -> BaseTask:
 def list_tasks() -> list[dict]:
     """List all available tasks."""
     return [
-        {"name": name, "description": task.description}
-        for name, task in TASKS.items()
+        {"name": task_cls.name, "description": task_cls.description}
+        for task_cls in TASKS.values()
     ]
 
 
 __all__ = [
     "BaseTask",
     "TaskResult",
-    "PRReviewTask",
+    "PRReviewTask", 
     "ArchitectureTask",
     "TASKS",
     "get_task",

@@ -1,0 +1,68 @@
+# Model Council Configuration
+# Copy to council.yaml in your project root or ~/.council/council.yaml
+
+# =============================================================================
+# Models
+# =============================================================================
+models:
+  # Which models to use by default (can override with --models flag)
+  default:
+    - claude
+    - gemini
+
+  # Model versions
+  claude:
+    version: claude-sonnet-4-20250514
+  
+  openai:
+    version: gpt-4o
+  
+  gemini:
+    version: gemini-2.0-flash
+  
+  mistral:
+    version: mistral-large-latest
+  
+  deepseek:
+    version: deepseek-chat
+  
+  groq:
+    version: llama-3.3-70b-versatile
+  
+  ollama:
+    version: llama3.2
+    host: http://localhost:11434
+
+# =============================================================================
+# Storage
+# =============================================================================
+storage:
+  # Enable/disable persistent storage
+  enabled: true
+  
+  # Database location
+  # Use ~ for home directory
+  path: ~/.council/data/council.db
+
+# =============================================================================
+# Deliberation (Multi-round review)
+# =============================================================================
+deliberation:
+  # Enable multi-round deliberation
+  enabled: true
+  
+  # Default number of rounds (can override with --rounds flag)
+  rounds: 2
+  
+  # Maximum rounds allowed
+  max_rounds: 5
+  
+  # Stop early if all models reach consensus
+  early_stop_on_consensus: true
+
+# =============================================================================
+# Review Settings
+# =============================================================================
+review:
+  # Score threshold for auto-approve (0.0 - 1.0)
+  approval_threshold: 0.7

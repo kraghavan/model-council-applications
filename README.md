@@ -1,273 +1,303 @@
-# Model Council 🏛️
+# Model Council
 
-A framework for running multiple AI models on the same task and aggregating their verdicts. Get consensus from Claude, GPT-4o, Gemini, Mistral, DeepSeek, Groq, and local Ollama models.
+> Multi-model AI consensus framework with deliberation and memory
 
-## Why Multiple Models?
+[![Tests](https://github.com/kraghavan/model-council-applications/actions/workflows/test.yml/badge.svg)](https://github.com/kraghavan/model-council-applications/actions)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- **Different blind spots** — models catch different issues
-- **Confidence through consensus** — agreement = higher trust
-- **Surface disagreements** — split verdicts need human attention
-- **Cost flexibility** — mix cloud APIs with free/local models
+Model Council brings multiple AI models together to review code, architecture, and documents through **multi-round deliberation** — models discuss, reconsider, and reach consensus.
+
+## What's Different?
+
+| Other Tools | Model Council |
+|-------------|---------------|
+| Single model | Multiple models vote |
+| One-shot review | Multi-round deliberation |
+| Stateless | Remembers past reviews |
+| Generic advice | Repo-aware insights |
+
+## Features
+
+- 🤖 **Multi-Model Consensus** — Claude, GPT-4, Gemini, Mistral, and more
+- 🔄 **Deliberation** — Models read each other's opinions and reconsider
+- 💾 **Memory** — Tracks reviews, opinions, and how they change
+- 📊 **Observability** — Token usage, latency, and cost tracking
+- 🎯 **Selective Review** — Focus on specific files
 
 ## Quick Start
 
+### Installation
+
 ```bash
+# Clone and install
 git clone https://github.com/kraghavan/model-council-applications.git
 cd model-council-applications
-cp .env.example .env        # Add your API keys
-pip install -r requirements.txt
-council pr-review https://github.com/owner/repo/pull/123
+pip install -e .
+
+# Initialize storage
+council init
 ```
 
-## Installation
+### Configuration
 
-### Prerequisites
-
-- Python 3.10+
-- [GitHub Personal Access Token](https://github.com/settings/tokens) (for PR review)
-- At least one model API key (see Supported Models below)
-
-### Setup
+1. **Create `.env`** (API keys — keep secret):
 
 ```bash
-# Clone
-git clone https://github.com/kraghavan/model-council-applications.git
-cd model-council-applications
+# Required: At least one model
+ANTHROPIC_API_KEY=sk-ant-xxx
+GOOGLE_API_KEY=xxx
 
-# Virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# Optional: More models
+OPENAI_API_KEY=sk-xxx
+MISTRAL_API_KEY=xxx
+GROQ_API_KEY=xxx
 
-# Install
-pip install -r requirements.txt
-
-# Configure
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-### Optional: Ollama Setup (Local Models)
-
-```bash
-# Install - https://ollama.ai
-brew install ollama        # Mac
-# or download from ollama.ai
-
-# Start server & pull model
-ollama serve
-ollama pull llama3.2       # In another terminal
-```
-
-## Configuration
-
-Edit `.env`:
-
-```bash
 # Required for PR review
-GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-
-# Model API keys (at least one required)
-ANTHROPIC_API_KEY=sk-ant-xxxxx   # Claude
-OPENAI_API_KEY=sk-xxxxx          # GPT-4o
-GOOGLE_API_KEY=AIzaSyxxxxx       # Gemini
-MISTRAL_API_KEY=xxxxx            # Mistral
-DEEPSEEK_API_KEY=sk-xxxxx        # DeepSeek (cheap!)
-GROQ_API_KEY=gsk_xxxxx           # Groq (free tier!)
-
-# Local models (no API key needed)
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-
-# Which models to use
-COUNCIL_MODELS=claude,openai,gemini
-
-# Score threshold for approval (0.0-1.0)
-APPROVAL_THRESHOLD=0.7
+GITHUB_TOKEN=ghp_xxx
 ```
 
-## Usage
+2. **Create `council.yaml`** (optional, can commit to repo):
 
-### Check Models
+```yaml
+models:
+  default: [claude, gemini]
 
-```bash
-council models
+storage:
+  enabled: true
+  path: ~/.council/data/council.db
+
+deliberation:
+  enabled: true
+  rounds: 2
 ```
 
-### PR Review
+### Usage
 
 ```bash
-council pr-review https://github.com/owner/repo/pull/123
+# Review a PR (single round)
 council pr-review owner/repo#123
-council pr-review owner/repo#123 --models claude,openai,deepseek
-council pr-review owner/repo#123 --json
+
+# Review with deliberation (models discuss)
+council pr-review owner/repo#123 --rounds 2
+
+# Review specific files only
+council pr-review owner/repo#123 --files "auth.py,utils.py"
+
+# Review architecture
+council architecture ./design.mermaid
+council architecture ./docs --files "system.mermaid,api.mermaid"
+
+# Check status
+council models    # Show configured models
+council history   # Show past reviews
+council stats     # Show statistics
 ```
 
-### Architecture Review
+## How Deliberation Works
 
-```bash
-# Review a design document
-council architecture ./docs/design.md
-
-# Review a mermaid diagram
-council architecture ./docs/architecture.mermaid
-
-# Analyze a repo structure
-council architecture ./my-project/
-
-# Review from URL
-council architecture https://raw.githubusercontent.com/org/repo/main/ARCHITECTURE.md
-
-# Review raw text diagram
-council architecture "Client -> LoadBalancer -> [API1, API2] -> Database"
 ```
-
-### List Tasks
-
-```bash
-council tasks
+┌─────────────────────────────────────────────────────────────────┐
+│  ROUND 1: Independent Review                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    PR Diff ──┬──▶ Claude ──▶ "APPROVE (85%)" ──┐               │
+│              ├──▶ Gemini ──▶ "COMMENT (70%)"  ──┼──▶ Store     │
+│              └──▶ GPT-4  ──▶ "APPROVE (90%)"  ──┘               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  ROUND 2: Informed Re-review                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    Each model reads others' opinions:                          │
+│    "Claude approved, Gemini had concerns about X..."           │
+│                                                                 │
+│    PR + Opinions ──┬──▶ Claude ──▶ "APPROVE (85%)" ──┐         │
+│                    ├──▶ Gemini ──▶ "APPROVE (80%)"  ──┼──▶ ✓   │
+│                    └──▶ GPT-4  ──▶ "APPROVE (88%)"  ──┘         │
+│                                                                 │
+│    Gemini reconsidered after seeing Claude's reasoning!        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  VERDICT: Consolidated                                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ✅ APPROVE — Score: 84% (full consensus)                    │
+│                                                                 │
+│    Opinion Changes:                                            │
+│    • Gemini: COMMENT → APPROVE (+10%)                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Example Output
 
 ```
-🤖 Council: claude, openai, deepseek
+🤖 Council: claude, gemini, openai
 
-📋 Add user authentication
+📋 Add authentication middleware
    https://github.com/owner/repo/pull/123
    Author: developer | main ← feature/auth
+   🔄 Deliberation: 2 rounds
 
-╭──────────────────────────────────────────────╮
-│ ✅ APPROVE — Score: 87% (full consensus)     │
-╰──────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────╮
+│ ✅ APPROVE — Score: 84% (full consensus) | 2 round(s)           │
+╰──────────────────────────────────────────────────────────────────╯
 
 Individual Results:
-  ✅ claude (89%): Well-structured implementation with good error handling...
-  ✅ openai (85%): Clean code, follows best practices...
-  ✅ deepseek (86%): Solid implementation, consider adding rate limiting...
+  ✅ claude (85%): Clean implementation with proper error handling
+  ✅ gemini (80%): Good security practices, minor suggestions
+  ✅ openai (88%): Well-structured middleware
 
-Key Issues:
-┌──────────┬─────────────┬────────────────────────────────────────┬───────────┐
-│ Severity │ Location    │ Issue                                  │ Flagged By│
-├──────────┼─────────────┼────────────────────────────────────────┼───────────┤
-│ minor    │ auth.py:42  │ Consider adding request timeout        │ claude    │
-│ nit      │ tests/      │ Missing edge case for expired tokens   │ openai    │
-└──────────┴─────────────┴────────────────────────────────────────┴───────────┘
+Opinion Changes:
+┌─────────┬───────────┬─────────────────┬─────────────────────┐
+│ Model   │ Round     │ Score Change    │ Verdict Change      │
+├─────────┼───────────┼─────────────────┼─────────────────────┤
+│ gemini  │ 1 → 2     │ 70% → 80% (+10%)│ COMMENT → APPROVE   │
+└─────────┴───────────┴─────────────────┴─────────────────────┘
+
+Session: a1b2c3d4 | Calls: 6 | Tokens: 12,450 | Time: 8.2s
 ```
 
-## Architecture
+## Configuration Reference
 
-```
-┌──────────┐
-│  Input   │  (PR URL, design doc, diagram, repo)
-└────┬─────┘
-     │
-     ▼
-┌──────────┐
-│   Task   │  (pr-review, architecture, etc.)
-└────┬─────┘
-     │
-  ┌──┴───┬───────┬────────┬──────────┬───────┐
-  ▼      ▼       ▼        ▼          ▼       ▼
-Claude OpenAI Gemini DeepSeek     Groq   Ollama
-  │      │       │        │          │       │
-  └──┬───┴───────┴────────┴──────────┴───────┘
-     │
-┌────▼─────┐
-│  Voting  │  (consensus, scores, issues)
-└────┬─────┘
-     │
-     ▼
-┌──────────┐
-│ Verdict  │  (APPROVE / REQUEST_CHANGES / COMMENT)
-└──────────┘
+### `.env` (Secrets)
+
+```bash
+# API Keys
+ANTHROPIC_API_KEY=sk-ant-xxx
+GOOGLE_API_KEY=xxx
+OPENAI_API_KEY=sk-xxx
+MISTRAL_API_KEY=xxx
+DEEPSEEK_API_KEY=xxx
+GROQ_API_KEY=xxx
+GITHUB_TOKEN=ghp_xxx
+
+# Overrides (optional)
+COUNCIL_STORAGE_ENABLED=true
+COUNCIL_STORAGE_PATH=~/.council/data/council.db
+COUNCIL_DELIBERATION_ROUNDS=2
+COUNCIL_MODELS=claude,gemini
 ```
 
-## Project Structure
+### `council.yaml` (Settings)
+
+```yaml
+models:
+  default: [claude, gemini]
+  
+  claude:
+    version: claude-sonnet-4-20250514
+  gemini:
+    version: gemini-2.0-flash
+  openai:
+    version: gpt-4o
+  ollama:
+    version: llama3.2
+    host: http://localhost:11434
+
+storage:
+  enabled: true
+  path: ~/.council/data/council.db
+
+deliberation:
+  enabled: true
+  rounds: 2
+  max_rounds: 5
+  early_stop_on_consensus: true
+
+review:
+  approval_threshold: 0.7
+```
+
+### Priority Order
 
 ```
-model-council-applications/
-├── .github/
-│   └── workflows/
-│       └── test.yml       # CI: runs tests on every PR
-├── council/
-│   ├── core/
-│   │   ├── models.py      # All model clients
-│   │   ├── runner.py      # Parallel execution
-│   │   └── voting.py      # Consensus/aggregation
-│   ├── tasks/
-│   │   ├── base.py        # Abstract task interface
-│   │   ├── pr_review.py   # PR review task
-│   │   └── architecture.py # Architecture review task
-│   ├── config.py          # Settings from .env
-│   └── cli.py             # Command-line interface
-├── tests/
-│   ├── test_core.py
-│   ├── test_models.py
-│   ├── test_tasks.py
-│   ├── test_architecture.py
-│   └── test_integration.py
-├── CLAUDE.md              # Claude Code context
-├── CONTRIBUTING.md        # How to contribute
-├── requirements.txt
-└── pyproject.toml
+CLI flags > Environment variables > council.yaml > Defaults
 ```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `council init` | Initialize database |
+| `council pr-review <url>` | Review a GitHub PR |
+| `council architecture <source>` | Review architecture |
+| `council models` | Show model status |
+| `council tasks` | List available tasks |
+| `council history` | Show past reviews |
+| `council stats [session_id]` | Show statistics |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--models, -m` | Models to use (comma-separated) |
+| `--files, -f` | Files to review (comma-separated) |
+| `--rounds, -r` | Deliberation rounds |
+| `--json` | Output as JSON |
+
+## Storage
+
+Model Council uses SQLite with [sqlite-vec](https://github.com/asg017/sqlite-vec) for persistent storage.
+
+```bash
+# Default location
+~/.council/data/council.db
+
+# Or per-project
+./council.db
+```
+
+### What's Stored
+
+- **Sources** — PRs, architecture docs reviewed
+- **Sessions** — Review sessions with rounds
+- **Opinions** — Each model's opinion per round
+- **Changes** — How opinions evolved
+- **Observations** — Token usage, latency, costs
+- **Verdicts** — Final consolidated decisions
+
+📖 **See [docs/SCHEMA.md](docs/SCHEMA.md) for full database schema documentation.**
 
 ## Supported Models
 
-| Model | Provider | Type | Cost | Get API Key |
-|-------|----------|------|------|-------------|
-| Claude | Anthropic | Cloud | $$ | [console.anthropic.com](https://console.anthropic.com/) |
-| GPT-4o | OpenAI | Cloud | $$ | [platform.openai.com](https://platform.openai.com/) |
-| Gemini | Google | Cloud | $ | [aistudio.google.com](https://aistudio.google.com/) |
-| Mistral | Mistral AI | Cloud | $ | [console.mistral.ai](https://console.mistral.ai/) |
-| DeepSeek | DeepSeek | Cloud | ¢ | [platform.deepseek.com](https://platform.deepseek.com/) |
-| Groq | Groq | Cloud | FREE | [console.groq.com](https://console.groq.com/) |
-| Ollama | Local | Local | FREE | [ollama.ai](https://ollama.ai/) |
+| Model | Provider | Requires |
+|-------|----------|----------|
+| Claude | Anthropic | `ANTHROPIC_API_KEY` |
+| Gemini | Google | `GOOGLE_API_KEY` |
+| GPT-4 | OpenAI | `OPENAI_API_KEY` |
+| Mistral | Mistral | `MISTRAL_API_KEY` |
+| DeepSeek | DeepSeek | `DEEPSEEK_API_KEY` |
+| Groq | Groq | `GROQ_API_KEY` |
+| Ollama | Local | Ollama running locally |
 
-**Budget-friendly combo:** `COUNCIL_MODELS=deepseek,groq,ollama`
+## Development
 
-## Available Tasks
+```bash
+# Install with dev dependencies
+pip install -e ".[dev]"
 
-| Task | Command | Description | Status |
-|------|---------|-------------|--------|
-| PR Review | `council pr-review <url>` | Review GitHub pull requests | ✅ Ready |
-| Architecture | `council architecture <source>` | Evaluate system design | ✅ Ready |
-| Doc Review | `council doc-review <file>` | Review documentation | 🔜 Planned |
-| Explain | `council explain <code>` | Explain code | 🔜 Planned |
+# Run tests
+pytest tests/ -v
 
-## CI/CD
-
-Every pull request automatically runs:
-- **Linting** with ruff
-- **Tests** on Python 3.10, 3.11, 3.12
-- **Coverage** report
-
-See `.github/workflows/test.yml`
+# Lint
+ruff check council/ tests/
+```
 
 ## Roadmap
 
-- [x] Multi-model PR review
-- [x] Architecture review task
-- [x] GitHub Actions CI
-- [ ] GitHub Action for automated PR reviews
-- [ ] Post review comments directly to PR
-- [ ] More tasks: doc review, code explanation
-- [ ] Web UI dashboard
-- [ ] Custom voting strategies
-
-## Fork & Extend
-
-Want to build on this? See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-
-- How to add new tasks
-- How to add new models
-- Development setup
-- Pull request guidelines
+- [x] v1.0 — Multi-model PR review
+- [x] v1.2 — Selective file review
+- [x] v2.0 — Memory DB + deliberation
+... 
 
 ## License
 
-MIT — fork it, extend it, make it yours.
-
-## Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+MIT

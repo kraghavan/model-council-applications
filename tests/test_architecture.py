@@ -290,7 +290,7 @@ class TestArchitectureFileFiltering:
         
         task = ArchitectureTask()
         
-        with pytest.raises(ValueError, match="(Files not found|No matching files)"):
+        with pytest.raises(ValueError, match="Files not found"):
             await task.fetch_input(str(tmp_path), file_filter=["something_completely_different"])
 
     @pytest.mark.asyncio

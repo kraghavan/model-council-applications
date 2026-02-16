@@ -16,7 +16,7 @@ class Verdict:
     decision: str
     consensus: str  # full, partial, split, none
     summary: str
-    results: list["TaskResult"]
+    results: list["TaskResult"] = field(default_factory=list)
     issues: list[dict] = field(default_factory=list)
 
     @property
@@ -116,7 +116,7 @@ def aggregate_results(
     all_issues.sort(key=lambda x: severity_order.get(x.get("severity", ""), 99))
     
     # Build summary
-    summaries = [f"**{r.model_name}** ({r.score:.0%}): {r.summary[:80]}..." for r in valid]
+    summaries = [f"**{r.model_name}** ({r.score:.0%}): {r.summary}" for r in valid]
     if errors:
         summaries.append(f"⚠️ Errors: {', '.join(r.model_name for r in errors)}")
     
