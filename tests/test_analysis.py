@@ -251,3 +251,217 @@ class TestSimilarity:
         results = await search.find_similar("test content", "pr-review")
         
         assert results == []
+
+
+class TestFingerprinting:
+    """Tests for issue fingerprinting."""
+    
+    def test_categorize_issue_sql_injection(self):
+        """Test SQL injection categorization."""
+        from council.analysis.fingerprint import categorize_issue
+        
+        assert categorize_issue("SQL injection vulnerability in query") == "sql_injection"
+        assert categorize_issue("Unsanitized user input in raw query") == "sql_injection"
+    
+    def test_categorize_issue_null_check(self):
+        """Test null check categorization."""
+        from council.analysis.fingerprint import categorize_issue
+        
+        assert categorize_issue("Missing null check before access") == "null_check"
+        assert categorize_issue("Could raise AttributeError if None") == "null_check"
+    
+    def test_categorize_issue_security(self):
+        """Test security categorization."""
+        from council.analysis.fingerprint import categorize_issue
+        
+        assert categorize_issue("Hardcoded password in config") == "security"
+        assert categorize_issue("API key exposed in source") == "security"
+    
+    def test_categorize_issue_performance(self):
+        """Test performance categorization."""
+        from council.analysis.fingerprint import categorize_issue
+        
+        assert categorize_issue("N+1 query in loop") == "performance"
+        assert categorize_issue("Inefficient O(n^2) algorithm") == "performance"
+    
+    def test_categorize_issue_other(self):
+        """Test unknown issues fall back to 'other'."""
+        from council.analysis.fingerprint import categorize_issue
+        
+        assert categorize_issue("Some random issue description") == "other"
+    
+    def test_extract_function_python(self):
+        """Test Python function extraction."""
+        from council.analysis.fingerprint import extract_function_name
+        
+        code = """
+class AuthService:
+    def login(self, username, password):
+        # Issue here at line 4
+        query = f"SELECT * FROM users WHERE name = '{username}'"
+        return self.db.execute(query)
+"""
+        
+        result = extract_function_name("auth.py", 4, code)
+        assert result == "login"
+    
+    def test_extract_function_python_class(self):
+        """Test Python class extraction when no function."""
+        from council.analysis.fingerprint import extract_function_name
+        
+        code = """
+class AuthService:
+    SECRET_KEY = "hardcoded"  # Issue at line 3
+"""
+        
+        result = extract_function_name("auth.py", 3, code)
+        assert result == "class:AuthService"
+    
+    def test_extract_function_javascript(self):
+        """Test JavaScript function extraction."""
+        from council.analysis.fingerprint import extract_function_name
+        
+        code = """
+function processUser(data) {
+    // Issue here
+    return data.name;
+}
+"""
+        
+        result = extract_function_name("utils.js", 3, code)
+        assert result == "processUser"
+    
+    def test_extract_function_javascript_arrow(self):
+        """Test JavaScript arrow function extraction."""
+        from council.analysis.fingerprint import extract_function_name
+        
+        code = """
+const handleSubmit = async (event) => {
+    // Issue here
+    return fetch(url);
+}
+"""
+        
+        result = extract_function_name("form.js", 3, code)
+        assert result == "handleSubmit"
+    
+    def test_generate_fingerprint_stable(self):
+        """Test fingerprint is deterministic."""
+        from council.analysis.fingerprint import generate_fingerprint
+        
+        fp1 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="SQL injection in query",
+        )
+        
+        fp2 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="SQL injection in query",
+        )
+        
+        assert fp1 == fp2
+    
+    def test_generate_fingerprint_different_files(self):
+        """Test different files produce different fingerprints."""
+        from council.analysis.fingerprint import generate_fingerprint
+        
+        fp1 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="SQL injection",
+        )
+        
+        fp2 = generate_fingerprint(
+            file_path="user.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="SQL injection",
+        )
+        
+        assert fp1 != fp2
+    
+    def test_generate_fingerprint_different_functions(self):
+        """Test different functions produce different fingerprints."""
+        from council.analysis.fingerprint import generate_fingerprint
+        
+        fp1 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="SQL injection",
+        )
+        
+        fp2 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="logout",
+            issue_type="sql_injection",
+            description="SQL injection",
+        )
+        
+        assert fp1 != fp2
+    
+    def test_create_issue_fingerprint(self):
+        """Test full fingerprint creation."""
+        from council.analysis.fingerprint import create_issue_fingerprint
+        
+        code = """
+def login(username):
+    query = f"SELECT * FROM users WHERE name = '{username}'"
+"""
+        
+        fp = create_issue_fingerprint(
+            file_path="auth.py",
+            line_number=3,
+            description="SQL injection vulnerability",
+            severity="critical",
+            file_content=code,
+        )
+        
+        assert fp.file_path == "auth.py"
+        assert fp.function_name == "login"
+        assert fp.issue_type == "sql_injection"
+        assert fp.severity == "critical"
+        assert fp.fingerprint is not None
+        assert len(fp.fingerprint) == 16
+    
+    def test_format_previous_issues(self):
+        """Test formatting previous issues for prompt."""
+        from council.analysis.fingerprint import format_previous_issues
+        
+        issues = [
+            {
+                "file_path": "auth.py",
+                "function_name": "login",
+                "severity": "critical",
+                "issue_description": "SQL injection",
+                "occurrences": 3,
+            },
+            {
+                "file_path": "auth.py",
+                "function_name": "logout",
+                "severity": "minor",
+                "issue_description": "Missing error handling",
+                "occurrences": 1,
+            },
+        ]
+        
+        result = format_previous_issues(issues)
+        
+        assert "Previous Unresolved Issues" in result
+        assert "auth.py" in result
+        assert "SQL injection" in result
+        assert "login()" in result
+        assert "seen 3x" in result
+    
+    def test_format_previous_issues_empty(self):
+        """Test empty issues returns empty string."""
+        from council.analysis.fingerprint import format_previous_issues
+        
+        result = format_previous_issues([])
+        
+        assert result == ""

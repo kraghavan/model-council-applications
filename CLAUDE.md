@@ -138,15 +138,6 @@ council stats <session_id>            # Session details
 CLI flags > ENV vars > council.yaml > defaults
 ```
 
-## Roadmap
-
-| Version | Features | Status |
-|---------|----------|--------|
-| v1.0.0 | Core multi-model review | ✅ |
-| v1.2.0 | Selective file review | ✅ |
-| v2.0.0 | Memory DB + deliberation | ✅ |
-...
-
 ## Testing
 
 ```bash
@@ -165,5 +156,5 @@ pytest tests/ --cov=council
 - Python 3.10+
 - Type hints required
 - Async/await for I/O
-- Ruff for linting # disabled TBFL
+- Ruff for linting
 - Dataclasses for models

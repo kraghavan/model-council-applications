@@ -328,6 +328,15 @@ Use this context to:
 
 {input_data['code_context']}"""
         
+        # Add previous unresolved issues
+        if input_data.get("previous_issues"):
+            from council.analysis.fingerprint import format_previous_issues
+            previous_issues_text = format_previous_issues(input_data["previous_issues"])
+            if previous_issues_text:
+                user_prompt += f"""
+
+{previous_issues_text}"""
+        
         # JSON response format
         json_fields = """
 {

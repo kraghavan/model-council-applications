@@ -78,12 +78,13 @@ class Deliberation:
         # Create source and session in storage
         source_id = None
         session_id = None
+        scope = self._extract_scope(input_data)
         
         if self.storage:
             source = self.storage.create_source(
                 task_type=self.task.name,
                 source_ref=input_data.get("url") or input_data.get("source", "unknown"),
-                scope=self._extract_scope(input_data),
+                scope=scope,
                 title=input_data.get("title"),
                 raw_content=input_data.get("diff") or input_data.get("content"),
                 metadata={k: v for k, v in input_data.items() 
@@ -97,6 +98,14 @@ class Deliberation:
                 max_rounds=self.config.rounds,
             )
             session_id = session.id
+            
+            # Fetch previous unresolved issues for this scope/files
+            previous_issues = self._fetch_previous_issues(
+                scope=scope,
+                files=input_data.get("files_reviewed"),
+            )
+            if previous_issues:
+                input_data["previous_issues"] = previous_issues
         else:
             session_id = "no-storage"
         
@@ -156,6 +165,8 @@ class Deliberation:
         
         # Get stats and save verdict
         stats = {}
+        issue_summary = {}
+        
         if self.storage:
             stats = self.storage.get_session_stats(session_id)
             
@@ -171,15 +182,32 @@ class Deliberation:
                 total_rounds=final_round,
             )
             
+            # Process and store issue fingerprints
+            if scope and verdict.issues:
+                issue_summary = self._process_issues(
+                    scope=scope,
+                    issues=verdict.issues,
+                    session_id=session_id,
+                    pr_number=input_data.get("number"),
+                    diff_content=input_data.get("diff"),
+                    previous_issues=input_data.get("previous_issues", []),
+                )
+            
             self.storage.complete_session(session_id)
         
-        return DeliberationResult(
+        result = DeliberationResult(
             session_id=session_id,
             verdict=verdict,
             total_rounds=final_round,
             opinion_changes=opinion_changes,
             stats=stats,
         )
+        
+        # Add issue summary to stats
+        if issue_summary:
+            result.stats["issues"] = issue_summary
+        
+        return result
     
     async def _run_round(
         self,
@@ -401,6 +429,130 @@ Respond with the same JSON format as before. Your score and verdict may change b
             return f"{input_data['owner']}/{input_data['repo']}"
         
         return input_data.get("scope")
+    
+    def _fetch_previous_issues(
+        self,
+        scope: Optional[str],
+        files: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Fetch previous unresolved issues for the scope/files.
+        
+        Args:
+            scope: Repository scope
+            files: Optional list of files being reviewed
+            
+        Returns:
+            List of previous issue dicts
+        """
+        if not self.storage or not scope:
+            return []
+        
+        try:
+            if files:
+                return self.storage.get_open_issues_for_scope(scope, file_paths=files)
+            else:
+                return self.storage.get_open_issues_for_scope(scope)
+        except Exception:
+            # Table might not exist yet
+            return []
+    
+    def _process_issues(
+        self,
+        scope: str,
+        issues: list[dict],
+        session_id: str,
+        pr_number: Optional[int] = None,
+        diff_content: Optional[str] = None,
+        previous_issues: list[dict] = None,
+    ) -> dict:
+        """Process issues from verdict and save fingerprints.
+        
+        Args:
+            scope: Repository scope
+            issues: Issues from verdict
+            session_id: Current session ID
+            pr_number: PR number
+            diff_content: Diff content for function extraction
+            previous_issues: Previously known issues
+            
+        Returns:
+            Summary dict with new, recurring, fixed counts
+        """
+        from council.analysis.fingerprint import create_issue_fingerprint
+        
+        previous_issues = previous_issues or []
+        previous_fingerprints = {
+            issue.get("fingerprint") for issue in previous_issues if issue.get("fingerprint")
+        }
+        
+        new_count = 0
+        recurring_count = 0
+        current_fingerprints = set()
+        
+        for issue in issues:
+            file_path = issue.get("file") or "unknown"
+            line_number = issue.get("line")
+            description = issue.get("description") or ""
+            severity = issue.get("severity", "minor")
+            
+            if not description:
+                continue
+            
+            # Create fingerprint
+            fp = create_issue_fingerprint(
+                file_path=file_path,
+                line_number=line_number,
+                description=description,
+                severity=severity,
+                file_content=diff_content,
+            )
+            
+            current_fingerprints.add(fp.fingerprint)
+            
+            # Check if this is a recurring issue
+            is_recurring = fp.fingerprint in previous_fingerprints
+            
+            if is_recurring:
+                recurring_count += 1
+            else:
+                new_count += 1
+            
+            # Save/update fingerprint in DB
+            try:
+                self.storage.save_issue_fingerprint(
+                    scope=scope,
+                    fingerprint=fp.fingerprint,
+                    file_path=fp.file_path,
+                    issue_description=fp.issue_description,
+                    severity=fp.severity,
+                    session_id=session_id,
+                    pr_number=pr_number,
+                    function_name=fp.function_name,
+                    issue_type=fp.issue_type,
+                    snippet=fp.snippet,
+                    snippet_hash=fp.snippet_hash,
+                    line_number=fp.line_number,
+                )
+            except Exception:
+                pass  # Best effort
+        
+        # Mark issues as fixed if they weren't found this time
+        fixed_count = 0
+        for prev_issue in previous_issues:
+            prev_fp = prev_issue.get("fingerprint")
+            if prev_fp and prev_fp not in current_fingerprints:
+                try:
+                    if self.storage.mark_issue_fixed(scope, prev_fp, session_id):
+                        fixed_count += 1
+                except Exception:
+                    pass
+        
+        return {
+            "new": new_count,
+            "recurring": recurring_count,
+            "fixed": fixed_count,
+            "total": len(issues),
+        }
 
 
 async def run_deliberation(

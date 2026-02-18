@@ -90,7 +90,24 @@ def format_verdict(result: DeliberationResult, task_name: str) -> None:
     
     # Issues table
     if verdict.issues:
-        console.print("\n[bold]Key Issues:[/]")
+        # Show issue tracking summary if available
+        if result.stats and result.stats.get("issues"):
+            issue_stats = result.stats["issues"]
+            summary_parts = []
+            if issue_stats.get("new", 0) > 0:
+                summary_parts.append(f"[cyan]{issue_stats['new']} new[/]")
+            if issue_stats.get("recurring", 0) > 0:
+                summary_parts.append(f"[yellow]{issue_stats['recurring']} recurring[/]")
+            if issue_stats.get("fixed", 0) > 0:
+                summary_parts.append(f"[green]{issue_stats['fixed']} fixed[/]")
+            
+            if summary_parts:
+                console.print(f"\n[bold]Issues:[/] {', '.join(summary_parts)}")
+            else:
+                console.print("\n[bold]Key Issues:[/]")
+        else:
+            console.print("\n[bold]Key Issues:[/]")
+        
         table = Table(show_header=True, header_style="bold", expand=True)
         table.add_column("Severity", width=10)
         table.add_column("Location", no_wrap=False)

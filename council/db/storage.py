@@ -910,3 +910,313 @@ class CouncilStorage:
         conn.close()
         
         return exists
+    
+    # =========================================================================
+    # Issue Fingerprints (v2.1.0)
+    # =========================================================================
+    
+    def save_issue_fingerprint(
+        self,
+        scope: str,
+        fingerprint: str,
+        file_path: str,
+        issue_description: str,
+        severity: str,
+        session_id: str,
+        pr_number: Optional[int] = None,
+        function_name: Optional[str] = None,
+        issue_type: Optional[str] = None,
+        snippet: Optional[str] = None,
+        snippet_hash: Optional[str] = None,
+        line_number: Optional[int] = None,
+    ) -> str:
+        """Save or update an issue fingerprint.
+        
+        If fingerprint already exists for scope, updates last_seen and increments occurrences.
+        Otherwise creates new record.
+        
+        Args:
+            scope: Repository scope (e.g., 'owner/repo')
+            fingerprint: Unique issue fingerprint hash
+            file_path: Path to file containing issue
+            issue_description: Description of the issue
+            severity: Issue severity
+            session_id: Current session ID
+            pr_number: PR number (optional)
+            function_name: Function containing issue (optional)
+            issue_type: Categorized issue type (optional)
+            snippet: Code snippet (optional)
+            snippet_hash: Hash of snippet (optional)
+            line_number: Line number (optional)
+            
+        Returns:
+            Issue fingerprint record ID
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        # Check if fingerprint exists
+        cursor.execute(
+            "SELECT id, occurrences FROM issue_fingerprints WHERE scope = ? AND fingerprint = ?",
+            (scope, fingerprint)
+        )
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing
+            record_id = existing["id"]
+            occurrences = existing["occurrences"] + 1
+            
+            cursor.execute(
+                """
+                UPDATE issue_fingerprints
+                SET last_seen_session = ?, last_seen_pr = ?, occurrences = ?,
+                    line_number = ?, updated_at = CURRENT_TIMESTAMP, status = 'open'
+                WHERE id = ?
+                """,
+                (session_id, pr_number, occurrences, line_number, record_id)
+            )
+        else:
+            # Create new
+            record_id = generate_id()
+            
+            cursor.execute(
+                """
+                INSERT INTO issue_fingerprints
+                (id, scope, fingerprint, file_path, function_name, issue_type,
+                 issue_description, snippet, snippet_hash, severity, line_number,
+                 first_seen_session, last_seen_session, first_seen_pr, last_seen_pr,
+                 status, occurrences)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 1)
+                """,
+                (
+                    record_id, scope, fingerprint, file_path, function_name, issue_type,
+                    issue_description, snippet, snippet_hash, severity, line_number,
+                    session_id, session_id, pr_number, pr_number,
+                )
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        return record_id
+    
+    def get_open_issues_for_scope(
+        self,
+        scope: str,
+        file_paths: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Get open (unresolved) issues for a scope.
+        
+        Args:
+            scope: Repository scope (e.g., 'owner/repo')
+            file_paths: Optional list of file paths to filter by
+            
+        Returns:
+            List of issue dicts
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        if file_paths:
+            placeholders = ','.join('?' * len(file_paths))
+            cursor.execute(
+                f"""
+                SELECT * FROM issue_fingerprints
+                WHERE scope = ? AND status = 'open' AND file_path IN ({placeholders})
+                ORDER BY 
+                    CASE severity 
+                        WHEN 'critical' THEN 1 
+                        WHEN 'major' THEN 2 
+                        WHEN 'minor' THEN 3 
+                        ELSE 4 
+                    END,
+                    occurrences DESC
+                """,
+                (scope, *file_paths)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM issue_fingerprints
+                WHERE scope = ? AND status = 'open'
+                ORDER BY 
+                    CASE severity 
+                        WHEN 'critical' THEN 1 
+                        WHEN 'major' THEN 2 
+                        WHEN 'minor' THEN 3 
+                        ELSE 4 
+                    END,
+                    occurrences DESC
+                """,
+                (scope,)
+            )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def get_issues_for_files(
+        self,
+        scope: str,
+        file_paths: list[str],
+    ) -> list[dict]:
+        """Get all issues (open or fixed) for specific files.
+        
+        Args:
+            scope: Repository scope
+            file_paths: List of file paths
+            
+        Returns:
+            List of issue dicts
+        """
+        if not file_paths:
+            return []
+        
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        placeholders = ','.join('?' * len(file_paths))
+        cursor.execute(
+            f"""
+            SELECT * FROM issue_fingerprints
+            WHERE scope = ? AND file_path IN ({placeholders})
+            ORDER BY file_path, line_number
+            """,
+            (scope, *file_paths)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def mark_issue_fixed(
+        self,
+        scope: str,
+        fingerprint: str,
+        session_id: str,
+    ) -> bool:
+        """Mark an issue as fixed.
+        
+        Args:
+            scope: Repository scope
+            fingerprint: Issue fingerprint
+            session_id: Session that verified the fix
+            
+        Returns:
+            True if issue was found and marked fixed
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """
+            UPDATE issue_fingerprints
+            SET status = 'fixed', last_seen_session = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE scope = ? AND fingerprint = ? AND status = 'open'
+            """,
+            (session_id, scope, fingerprint)
+        )
+        
+        updated = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        
+        return updated
+    
+    def mark_issues_fixed_batch(
+        self,
+        scope: str,
+        fingerprints: list[str],
+        session_id: str,
+    ) -> int:
+        """Mark multiple issues as fixed.
+        
+        Args:
+            scope: Repository scope
+            fingerprints: List of fingerprints to mark fixed
+            session_id: Session that verified the fixes
+            
+        Returns:
+            Number of issues marked fixed
+        """
+        if not fingerprints:
+            return 0
+        
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        placeholders = ','.join('?' * len(fingerprints))
+        cursor.execute(
+            f"""
+            UPDATE issue_fingerprints
+            SET status = 'fixed', last_seen_session = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE scope = ? AND fingerprint IN ({placeholders}) AND status = 'open'
+            """,
+            (session_id, scope, *fingerprints)
+        )
+        
+        updated = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return updated
+    
+    def get_issue_stats(self, scope: str) -> dict:
+        """Get issue statistics for a scope.
+        
+        Args:
+            scope: Repository scope
+            
+        Returns:
+            Dict with stats
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        # Total counts by status
+        cursor.execute(
+            """
+            SELECT status, COUNT(*) as count
+            FROM issue_fingerprints
+            WHERE scope = ?
+            GROUP BY status
+            """,
+            (scope,)
+        )
+        status_counts = {row["status"]: row["count"] for row in cursor.fetchall()}
+        
+        # Counts by severity (open only)
+        cursor.execute(
+            """
+            SELECT severity, COUNT(*) as count
+            FROM issue_fingerprints
+            WHERE scope = ? AND status = 'open'
+            GROUP BY severity
+            """,
+            (scope,)
+        )
+        severity_counts = {row["severity"]: row["count"] for row in cursor.fetchall()}
+        
+        # Recurring issues (seen more than once)
+        cursor.execute(
+            """
+            SELECT COUNT(*) as count
+            FROM issue_fingerprints
+            WHERE scope = ? AND status = 'open' AND occurrences > 1
+            """,
+            (scope,)
+        )
+        recurring = cursor.fetchone()["count"]
+        
+        conn.close()
+        
+        return {
+            "open": status_counts.get("open", 0),
+            "fixed": status_counts.get("fixed", 0),
+            "wont_fix": status_counts.get("wont_fix", 0),
+            "by_severity": severity_counts,
+            "recurring": recurring,
+        }

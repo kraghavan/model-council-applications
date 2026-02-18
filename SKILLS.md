@@ -39,6 +39,15 @@ council pr-review owner/repo#123 --deep  # Deep analysis mode
 - Design pattern recommendations
 - Context caching for faster subsequent reviews
 
+### Issue Tracking
+
+Model Council automatically tracks issues across reviews:
+
+- **Fingerprinting** — Issues identified by function + type, not line number
+- **Recurring detection** — "This issue was seen 3x before"
+- **Fixed detection** — Automatically marks resolved issues
+- **Prompt injection** — Models see previous unresolved issues
+
 ### architecture
 
 Review system architecture from diagrams, docs, or repo structure.

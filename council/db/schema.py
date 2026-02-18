@@ -30,7 +30,7 @@ except (ImportError, AttributeError):
     pass
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 -- Schema version tracking
@@ -84,6 +84,32 @@ CREATE TABLE IF NOT EXISTS code_contexts (
     summary TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (source_id) REFERENCES sources(id)
+);
+
+-- Issue Fingerprints: Track issues across reviews
+CREATE TABLE IF NOT EXISTS issue_fingerprints (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,                  -- 'owner/repo'
+    fingerprint TEXT NOT NULL,            -- Unique hash
+    file_path TEXT NOT NULL,
+    function_name TEXT,                   -- Nullable (best effort extraction)
+    issue_type TEXT,                      -- 'sql_injection', 'null_check', etc.
+    issue_description TEXT,
+    snippet TEXT,                         -- Code around issue
+    snippet_hash TEXT,
+    severity TEXT,                        -- 'critical', 'major', 'minor', 'nit'
+    line_number INTEGER,                  -- Last known line
+    first_seen_session TEXT,
+    last_seen_session TEXT,
+    first_seen_pr INTEGER,                -- PR number
+    last_seen_pr INTEGER,
+    status TEXT DEFAULT 'open',           -- 'open', 'fixed', 'wont_fix'
+    occurrences INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (first_seen_session) REFERENCES sessions(id),
+    FOREIGN KEY (last_seen_session) REFERENCES sessions(id),
+    UNIQUE(scope, fingerprint)
 );
 
 -- Sessions: A complete review (may span multiple rounds)
@@ -192,6 +218,9 @@ CREATE INDEX IF NOT EXISTS idx_opinion_changes_session ON opinion_changes(sessio
 CREATE INDEX IF NOT EXISTS idx_long_term_memory_scope ON long_term_memory(scope);
 CREATE INDEX IF NOT EXISTS idx_long_term_memory_type ON long_term_memory(memory_type);
 CREATE INDEX IF NOT EXISTS idx_code_contexts_source ON code_contexts(source_id);
+CREATE INDEX IF NOT EXISTS idx_issue_fingerprints_scope ON issue_fingerprints(scope);
+CREATE INDEX IF NOT EXISTS idx_issue_fingerprints_file ON issue_fingerprints(file_path);
+CREATE INDEX IF NOT EXISTS idx_issue_fingerprints_status ON issue_fingerprints(status);
 """
 
 

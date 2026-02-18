@@ -261,6 +261,36 @@ Insights learned across reviews.
 
 ---
 
+### `issue_fingerprints` (v2.1.0)
+
+Tracks issues across reviews with stable fingerprints.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT | Primary key (8-char UUID) |
+| `scope` | TEXT | Repository scope (e.g., `owner/repo`) |
+| `fingerprint` | TEXT | Unique hash (file + function + type + description) |
+| `file_path` | TEXT | File containing the issue |
+| `function_name` | TEXT | Function containing issue (nullable) |
+| `issue_type` | TEXT | Categorized type (e.g., `sql_injection`, `null_check`) |
+| `issue_description` | TEXT | Description of the issue |
+| `snippet` | TEXT | Code snippet around issue |
+| `snippet_hash` | TEXT | Hash of snippet |
+| `severity` | TEXT | `critical`, `major`, `minor`, `nit` |
+| `line_number` | INTEGER | Last known line number |
+| `first_seen_session` | TEXT | Session that first detected this |
+| `last_seen_session` | TEXT | Most recent session |
+| `first_seen_pr` | INTEGER | PR number when first seen |
+| `last_seen_pr` | INTEGER | PR number when last seen |
+| `status` | TEXT | `open`, `fixed`, `wont_fix` |
+| `occurrences` | INTEGER | How many times seen |
+| `created_at` | TIMESTAMP | When created |
+| `updated_at` | TIMESTAMP | When last updated |
+
+**Fingerprint Stability:** Issues are tracked by fingerprint (hash of file + function + type), not line number. This means issues are still tracked even when line numbers change due to code modifications.
+
+---
+
 ## Indexes
 
 ```sql
@@ -276,6 +306,9 @@ CREATE INDEX idx_observations_session ON observations(session_id);
 CREATE INDEX idx_opinion_changes_session ON opinion_changes(session_id);
 CREATE INDEX idx_code_contexts_source ON code_contexts(source_id);
 CREATE INDEX idx_long_term_memory_scope ON long_term_memory(scope);
+CREATE INDEX idx_issue_fingerprints_scope ON issue_fingerprints(scope);
+CREATE INDEX idx_issue_fingerprints_file ON issue_fingerprints(file_path);
+CREATE INDEX idx_issue_fingerprints_status ON issue_fingerprints(status);
 ```
 
 ---
@@ -360,6 +393,62 @@ ORDER BY s.started_at DESC
 LIMIT 5;
 ```
 
+### Get open issues for a repository
+
+```sql
+SELECT 
+    file_path,
+    function_name,
+    issue_type,
+    severity,
+    issue_description,
+    occurrences,
+    first_seen_pr,
+    last_seen_pr
+FROM issue_fingerprints
+WHERE scope = 'owner/repo' AND status = 'open'
+ORDER BY 
+    CASE severity 
+        WHEN 'critical' THEN 1 
+        WHEN 'major' THEN 2 
+        WHEN 'minor' THEN 3 
+        ELSE 4 
+    END,
+    occurrences DESC;
+```
+
+### Get recurring issues (seen more than once)
+
+```sql
+SELECT 
+    file_path,
+    function_name,
+    issue_description,
+    severity,
+    occurrences,
+    first_seen_pr,
+    last_seen_pr
+FROM issue_fingerprints
+WHERE scope = 'owner/repo' 
+    AND status = 'open' 
+    AND occurrences > 1
+ORDER BY occurrences DESC;
+```
+
+### Get issue statistics for a repository
+
+```sql
+SELECT 
+    status,
+    COUNT(*) as count,
+    COUNT(CASE WHEN severity = 'critical' THEN 1 END) as critical,
+    COUNT(CASE WHEN severity = 'major' THEN 1 END) as major,
+    COUNT(CASE WHEN severity = 'minor' THEN 1 END) as minor
+FROM issue_fingerprints
+WHERE scope = 'owner/repo'
+GROUP BY status;
+```
+
 ---
 
 ## Entity Relationships
@@ -377,7 +466,15 @@ sources (1) ──────< sessions (N)
     │                   │
     │                   └──────< opinion_changes (N)
     │
-    └──────< verdicts (N)
+    ├──────< verdicts (N)
+    │
+    ├──────< source_embeddings (1)
+    │
+    └──────< code_contexts (N)
+
+issue_fingerprints ──────< sessions (via first/last_seen_session)
+    │
+    └── Tracks issues across PRs with stable fingerprints
 ```
 
 ---

@@ -170,6 +170,55 @@ With `--deep`, models also suggest:
 - Performance optimizations
 - Code consistency with existing patterns
 
+## Issue Tracking
+
+Model Council tracks issues across reviews using **fingerprinting** — issues are identified by function and type, not just line number.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #10: First Review                                          │
+├─────────────────────────────────────────────────────────────────┤
+│  Model finds: "SQL injection in login()"                        │
+│  → Generate fingerprint: hash(file + function + type)          │
+│  → Store as: status='open', occurrences=1                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #15: Second Review                                         │
+├─────────────────────────────────────────────────────────────────┤
+│  Inject previous issues into prompt:                           │
+│  "Please verify if these issues are still present..."          │
+│                                                                 │
+│  Model finds: Same issue still there                           │
+│  → Update: occurrences=2                                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #20: Issue Fixed                                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Model: Issue NOT found in this PR                             │
+│  → Mark as: status='fixed'                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Output
+
+```
+Issues: 2 new, 1 recurring, 1 fixed
+```
+
+### Why Fingerprinting?
+
+| Without Fingerprinting | With Fingerprinting |
+|------------------------|---------------------|
+| Issue at line 45 | Issue in `login()` function |
+| Code changes → Line 55 | Code changes → Still tracked |
+| System: "New issue" | System: "Recurring (3x)" |
+
 ## How Deliberation Works
 
 ```
@@ -363,6 +412,7 @@ Model Council uses SQLite with [sqlite-vec](https://github.com/asg017/sqlite-vec
 | [CLAUDE.md](CLAUDE.md) | Project context for AI assistants |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [docs/SCHEMA.md](docs/SCHEMA.md) | Database schema reference |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture diagrams |
 
 ## Development
 
@@ -376,14 +426,6 @@ pytest tests/ -v
 # Lint
 ruff check council/ tests/
 ```
-
-## Roadmap
-
-- [x] v1.0 — Multi-model PR review
-- [x] v1.2 — Selective file review
-- [x] v2.0 — Memory DB + deliberation
-- [x] v2.1 — Memory DB + deliberation + deeper analysis
-... 
 
 ## License
 
