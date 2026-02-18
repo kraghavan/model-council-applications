@@ -131,17 +131,30 @@ async def execute_task(
     models: list[str], 
     file_filter: list[str] | None = None,
     rounds: int = 1,
+    deep_analysis: bool = False,
+    fresh: bool = False,
 ) -> DeliberationResult:
     """Execute a task and return the result."""
     settings = get_settings()
     task = get_task(task_name)
     
-    # Fetch input with optional file filter
-    with console.status(f"[bold blue]Fetching input for {task_name}..."):
-        if file_filter and hasattr(task, 'fetch_input'):
-            input_data = await task.fetch_input(source, file_filter=file_filter)
+    # Fetch input with optional file filter and deep analysis
+    status_msg = f"[bold blue]Fetching input for {task_name}..."
+    if deep_analysis:
+        if fresh:
+            status_msg = f"[bold blue]Fetching input for {task_name} (deep analysis, fresh)..."
         else:
-            input_data = await task.fetch_input(source)
+            status_msg = f"[bold blue]Fetching input for {task_name} (deep analysis)..."
+    
+    with console.status(status_msg):
+        kwargs = {}
+        if file_filter:
+            kwargs["file_filter"] = file_filter
+        if deep_analysis and task_name == "pr-review":
+            kwargs["deep_analysis"] = True
+            kwargs["fresh"] = fresh
+        
+        input_data = await task.fetch_input(source, **kwargs)
     
     # Display task info
     if task_name == "pr-review" and "title" in input_data:
@@ -155,6 +168,12 @@ async def execute_task(
             total_files = input_data.get("total_files_in_pr", len(files_reviewed))
             if len(files_reviewed) < total_files:
                 console.print(f"   📁 Reviewing [cyan]{len(files_reviewed)}[/] of {total_files} files: {', '.join(files_reviewed)}")
+        
+        if input_data.get("deep_analysis"):
+            if input_data.get("context_from_cache"):
+                console.print(f"   🔬 [cyan]Deep analysis[/] (using cached context)")
+            else:
+                console.print(f"   🔬 [cyan]Deep analysis enabled[/] (code context fetched)")
     
     elif task_name == "architecture":
         console.print(f"📐 [bold]Architecture Review[/]")
@@ -239,8 +258,10 @@ def init_command(force: bool):
 @click.option("--models", "-m", help="Comma-separated list of models")
 @click.option("--files", "-f", help="Only review these files (comma-separated)")
 @click.option("--rounds", "-r", type=int, default=None, help="Number of deliberation rounds (default: from config)")
+@click.option("--deep", "-d", is_flag=True, help="Deep analysis: fetch code context and suggest patterns")
+@click.option("--fresh", is_flag=True, help="Force fresh context fetch (ignore cache)")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON")
-def pr_review(pr_url: str, models: str | None, files: str | None, rounds: int | None, output_json: bool):
+def pr_review(pr_url: str, models: str | None, files: str | None, rounds: int | None, deep: bool, fresh: bool, output_json: bool):
     """Review a GitHub pull request.
     
     PR_URL: GitHub PR URL or owner/repo#number
@@ -252,12 +273,16 @@ def pr_review(pr_url: str, models: str | None, files: str | None, rounds: int | 
         council pr-review owner/repo#123 --files "auth.py,utils.py"
         
         council pr-review owner/repo#123 --rounds 3
+        
+        council pr-review owner/repo#123 --deep
+        
+        council pr-review owner/repo#123 --deep --fresh
     """
     file_filter = None
     if files:
         file_filter = [f.strip() for f in files.split(",")]
     
-    _run_task("pr-review", pr_url, models, output_json, file_filter=file_filter, rounds=rounds)
+    _run_task("pr-review", pr_url, models, output_json, file_filter=file_filter, rounds=rounds, deep_analysis=deep, fresh=fresh)
 
 
 @main.command("architecture")
@@ -309,6 +334,8 @@ def _run_task(
     output_json: bool, 
     file_filter: list[str] | None = None,
     rounds: int | None = None,
+    deep_analysis: bool = False,
+    fresh: bool = False,
 ):
     """Internal task runner."""
     settings = get_settings()
@@ -335,7 +362,7 @@ def _run_task(
     console.print(f"🤖 Council: [bold]{', '.join(models)}[/]\n")
     
     try:
-        result = asyncio.run(execute_task(task_name, source, models, file_filter, rounds))
+        result = asyncio.run(execute_task(task_name, source, models, file_filter, rounds, deep_analysis, fresh))
         
         if output_json:
             import json

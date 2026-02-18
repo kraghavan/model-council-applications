@@ -72,6 +72,9 @@ DEFAULT_CONFIG = {
     "review": {
         "approval_threshold": 0.7,
     },
+    "cache": {
+        "context_ttl_seconds": 3600,  # 1 hour default
+    },
 }
 
 
@@ -127,6 +130,9 @@ class Settings(BaseSettings):
 
     # Review settings
     approval_threshold: Optional[float] = None
+
+    # Cache settings (can override via ENV)
+    council_context_cache_ttl: Optional[int] = None  # Seconds
 
     # Internal: loaded config
     _yaml_config: dict = {}
@@ -255,6 +261,17 @@ class Settings(BaseSettings):
         if self.approval_threshold is not None:
             return self.approval_threshold
         return self._get_config("review", "approval_threshold", default=0.7)
+
+    # =========================================================================
+    # Cache Configuration
+    # =========================================================================
+    
+    @property
+    def context_cache_ttl(self) -> int:
+        """Get context cache TTL in seconds."""
+        if self.council_context_cache_ttl is not None:
+            return self.council_context_cache_ttl
+        return self._get_config("cache", "context_ttl_seconds", default=3600)
 
 
 @lru_cache

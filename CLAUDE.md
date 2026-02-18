@@ -146,6 +146,7 @@ CLI flags > ENV vars > council.yaml > defaults
 | v1.2.0 | Selective file review | ✅ |
 | v2.0.0 | Memory DB + deliberation | ✅ |
 ...
+
 ## Testing
 
 ```bash

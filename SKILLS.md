@@ -23,6 +23,7 @@ Review GitHub pull requests with multiple models.
 council pr-review https://github.com/owner/repo/pull/123
 council pr-review owner/repo#123 --models claude,openai,deepseek
 council pr-review owner/repo#123 --json
+council pr-review owner/repo#123 --deep  # Deep analysis mode
 ```
 
 **What it analyzes:**
@@ -31,6 +32,12 @@ council pr-review owner/repo#123 --json
 - Performance concerns
 - Code clarity and maintainability
 - Test coverage gaps
+
+**Deep analysis (`--deep`) adds:**
+- Import parsing and dependency tracking
+- Related source file context
+- Design pattern recommendations
+- Context caching for faster subsequent reviews
 
 ### architecture
 
@@ -156,6 +163,9 @@ deliberation:
 | Deep consensus | `council pr-review url --rounds 3` |
 | Focused review | `council pr-review url --files "critical.py"` |
 | Multi-model | `council pr-review url -m claude,gemini,openai` |
+| Deep analysis | `council pr-review url --deep` |
+| Fresh context | `council pr-review url --deep --fresh` |
+| Full analysis | `council pr-review url --deep --rounds 2` |
 | Architecture | `council architecture ./docs` |
 
 ---

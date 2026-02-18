@@ -66,3 +66,11 @@ deliberation:
 review:
   # Score threshold for auto-approve (0.0 - 1.0)
   approval_threshold: 0.7
+
+# =============================================================================
+# Cache Settings (Deep Analysis)
+# =============================================================================
+cache:
+  # How long to cache code context (in seconds)
+  # Can also set via COUNCIL_CONTEXT_CACHE_TTL env var
+  context_ttl_seconds: 3600  # 1 hour

@@ -30,7 +30,7 @@ except (ImportError, AttributeError):
     pass
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 -- Schema version tracking
@@ -50,6 +50,40 @@ CREATE TABLE IF NOT EXISTS sources (
     raw_content TEXT,
     metadata TEXT,                        -- JSON: task-specific data
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Source Embeddings: Vector embeddings for similarity search
+CREATE TABLE IF NOT EXISTS source_embeddings (
+    source_id TEXT PRIMARY KEY,
+    embedding TEXT,                       -- JSON array of floats
+    provider TEXT,                        -- 'openai', 'google', 'fallback'
+    dimensions INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+);
+
+-- Long-term Memory: Insights learned across reviews
+CREATE TABLE IF NOT EXISTS long_term_memory (
+    id TEXT PRIMARY KEY,
+    scope TEXT,                           -- 'owner/repo' or project name
+    memory_type TEXT,                     -- 'pattern', 'issue', 'decision'
+    content TEXT,
+    source_session_id TEXT,               -- Session that created this memory
+    relevance_score REAL DEFAULT 1.0,     -- How relevant/useful this memory is
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Code Contexts: Cached deep analysis results
+CREATE TABLE IF NOT EXISTS code_contexts (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    session_id TEXT,
+    context_text TEXT,                    -- Formatted context for prompts
+    imports TEXT,                         -- JSON: parsed imports
+    related_files TEXT,                   -- JSON: fetched related files
+    summary TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
 );
 
 -- Sessions: A complete review (may span multiple rounds)
@@ -155,6 +189,9 @@ CREATE INDEX IF NOT EXISTS idx_round_opinions_model ON round_opinions(model);
 CREATE INDEX IF NOT EXISTS idx_verdicts_source ON verdicts(source_id);
 CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
 CREATE INDEX IF NOT EXISTS idx_opinion_changes_session ON opinion_changes(session_id);
+CREATE INDEX IF NOT EXISTS idx_long_term_memory_scope ON long_term_memory(scope);
+CREATE INDEX IF NOT EXISTS idx_long_term_memory_type ON long_term_memory(memory_type);
+CREATE INDEX IF NOT EXISTS idx_code_contexts_source ON code_contexts(source_id);
 """
 
 

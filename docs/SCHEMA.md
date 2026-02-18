@@ -14,7 +14,7 @@ This document describes the SQLite database schema used by Model Council for sto
 │  │           │       │           │       │                 │               │
 │  │ PR/arch   │       │ models    │       │ round_number    │               │
 │  │ content   │       │ status    │       │ status          │               │
-│  └───────────┘       └─────┬─────┘       └────────┬────────┘               │
+│  └─────┬─────┘       └─────┬─────┘       └────────┬────────┘               │
 │        │                   │                      │                        │
 │        │                   │                      ▼                        │
 │        │                   │             ┌─────────────────┐               │
@@ -29,15 +29,22 @@ This document describes the SQLite database schema used by Model Council for sto
 │        │           │   verdicts    │     │ opinion_changes │               │
 │        │           │               │     │                 │               │
 │        └──────────▶│ final_score   │     │ score_before    │               │
-│                    │ final_verdict │     │ score_after     │               │
-│                    └───────────────┘     └─────────────────┘               │
+│        │           │ final_verdict │     │ score_after     │               │
+│        │           └───────────────┘     └─────────────────┘               │
+│        │                                                                    │
+│        │           ┌───────────────┐     ┌─────────────────┐               │
+│        │           │ observations  │     │ code_contexts   │               │
+│        │           │               │     │ (deep analysis) │               │
+│        │           │ tokens, cost  │     │ cached context  │               │
+│        │           │ latency       │     │ imports, files  │               │
+│        │           └───────────────┘     └─────────────────┘               │
+│        │                                          ▲                        │
+│        └──────────────────────────────────────────┘                        │
 │                                                                             │
-│                    ┌───────────────┐                                       │
-│                    │ observations  │                                       │
-│                    │               │                                       │
-│                    │ tokens, cost  │                                       │
-│                    │ latency       │                                       │
-│                    └───────────────┘                                       │
+│        ┌───────────────────┐     ┌─────────────────┐                       │
+│        │ source_embeddings │     │ long_term_memory│                       │
+│        │ (vector search)   │     │ patterns, issues│                       │
+│        └───────────────────┘     └─────────────────┘                       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -205,6 +212,55 @@ Track how opinions evolve between rounds.
 
 ---
 
+### `source_embeddings` (v2.1.0)
+
+Vector embeddings for similarity search.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_id` | TEXT | Primary key, FK → `sources.id` |
+| `embedding` | TEXT | JSON array of floats |
+| `provider` | TEXT | `openai`, `google`, or `fallback` |
+| `dimensions` | INTEGER | Vector dimensions (384, 768, or 1536) |
+| `created_at` | TIMESTAMP | When created |
+
+---
+
+### `code_contexts` (v2.1.0)
+
+Cached deep analysis results for faster subsequent reviews.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT | Primary key (8-char UUID) |
+| `source_id` | TEXT | FK → `sources.id` |
+| `session_id` | TEXT | Session that created this |
+| `context_text` | TEXT | Formatted context for prompts |
+| `imports` | TEXT | JSON: parsed imports |
+| `related_files` | TEXT | JSON: fetched related files |
+| `summary` | TEXT | Context summary |
+| `created_at` | TIMESTAMP | When created |
+
+**Usage:** When `--deep` is used, context is cached here. Subsequent reviews of same repo reuse cached context.
+
+---
+
+### `long_term_memory` (v2.1.0)
+
+Insights learned across reviews.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT | Primary key (8-char UUID) |
+| `scope` | TEXT | Scope (e.g., `owner/repo`) |
+| `memory_type` | TEXT | `pattern`, `issue`, `decision` |
+| `content` | TEXT | Memory content |
+| `source_session_id` | TEXT | Session that created this |
+| `relevance_score` | REAL | Relevance (0-1) |
+| `created_at` | TIMESTAMP | When created |
+
+---
+
 ## Indexes
 
 ```sql
@@ -218,6 +274,8 @@ CREATE INDEX idx_round_opinions_model ON round_opinions(model);
 CREATE INDEX idx_verdicts_source ON verdicts(source_id);
 CREATE INDEX idx_observations_session ON observations(session_id);
 CREATE INDEX idx_opinion_changes_session ON opinion_changes(session_id);
+CREATE INDEX idx_code_contexts_source ON code_contexts(source_id);
+CREATE INDEX idx_long_term_memory_scope ON long_term_memory(scope);
 ```
 
 ---
@@ -322,3 +380,33 @@ sources (1) ──────< sessions (N)
     └──────< verdicts (N)
 ```
 
+---
+
+## Database Location
+
+Default: `~/.council/data/council.db`
+
+Override via:
+- Environment: `COUNCIL_STORAGE_PATH=/path/to/db`
+- Config: `council.yaml` → `storage.path`
+
+---
+
+## Inspecting the Database
+
+```bash
+# Open with sqlite3
+sqlite3 ~/.council/data/council.db
+
+# List tables
+.tables
+
+# Show schema
+.schema sources
+
+# Query sessions
+SELECT id, status, started_at FROM sessions LIMIT 5;
+
+# Exit
+.quit
+```

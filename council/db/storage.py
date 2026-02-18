@@ -647,3 +647,266 @@ class CouncilStorage:
         conn.close()
         
         return [dict(row) for row in rows]
+    
+    # =========================================================================
+    # Embeddings (v2.1.0)
+    # =========================================================================
+    
+    def save_embedding(
+        self,
+        source_id: str,
+        embedding: list[float],
+        provider: str,
+        dimensions: int,
+    ) -> None:
+        """Save embedding for a source.
+        
+        Args:
+            source_id: Source ID
+            embedding: Vector as list of floats
+            provider: Embedding provider name
+            dimensions: Vector dimensions
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO source_embeddings (source_id, embedding, provider, dimensions)
+            VALUES (?, ?, ?, ?)
+            """,
+            (source_id, json.dumps(embedding), provider, dimensions)
+        )
+        
+        conn.commit()
+        conn.close()
+    
+    def get_embedding(self, source_id: str) -> Optional[list[float]]:
+        """Get embedding for a source.
+        
+        Args:
+            source_id: Source ID
+            
+        Returns:
+            Vector as list of floats, or None if not found
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT embedding FROM source_embeddings WHERE source_id = ?",
+            (source_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row["embedding"]:
+            return json.loads(row["embedding"])
+        return None
+    
+    # =========================================================================
+    # Long-term Memory (v2.1.0)
+    # =========================================================================
+    
+    def save_memory(
+        self,
+        scope: str,
+        memory_type: str,
+        content: str,
+        source_session_id: Optional[str] = None,
+        relevance_score: float = 1.0,
+    ) -> str:
+        """Save a long-term memory.
+        
+        Args:
+            scope: Scope (e.g., 'owner/repo')
+            memory_type: Type of memory ('pattern', 'issue', 'decision')
+            content: Memory content
+            source_session_id: Session that created this memory
+            relevance_score: How relevant this memory is (0-1)
+            
+        Returns:
+            Memory ID
+        """
+        memory_id = generate_id()
+        
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """
+            INSERT INTO long_term_memory (id, scope, memory_type, content, source_session_id, relevance_score)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (memory_id, scope, memory_type, content, source_session_id, relevance_score)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return memory_id
+    
+    def get_memories(
+        self,
+        scope: str,
+        memory_type: Optional[str] = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Get long-term memories for a scope.
+        
+        Args:
+            scope: Scope to filter by
+            memory_type: Optional type filter
+            limit: Maximum memories to return
+            
+        Returns:
+            List of memory dicts
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        if memory_type:
+            cursor.execute(
+                """
+                SELECT * FROM long_term_memory
+                WHERE scope = ? AND memory_type = ?
+                ORDER BY relevance_score DESC, created_at DESC
+                LIMIT ?
+                """,
+                (scope, memory_type, limit)
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM long_term_memory
+                WHERE scope = ?
+                ORDER BY relevance_score DESC, created_at DESC
+                LIMIT ?
+                """,
+                (scope, limit)
+            )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def update_memory_relevance(self, memory_id: str, relevance_score: float) -> None:
+        """Update memory relevance score.
+        
+        Args:
+            memory_id: Memory ID
+            relevance_score: New relevance score (0-1)
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "UPDATE long_term_memory SET relevance_score = ? WHERE id = ?",
+            (relevance_score, memory_id)
+        )
+        
+        conn.commit()
+        conn.close()
+    
+    # =========================================================================
+    # Code Contexts (v2.1.0) - Cached deep analysis
+    # =========================================================================
+    
+    def save_code_context(
+        self,
+        source_id: str,
+        context_text: str,
+        imports: list[dict] | None = None,
+        related_files: list[dict] | None = None,
+        summary: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        """Save cached code context for a source.
+        
+        Args:
+            source_id: Source ID
+            context_text: Formatted context for prompts
+            imports: Parsed imports (optional)
+            related_files: Related files fetched (optional)
+            summary: Context summary (optional)
+            session_id: Session that created this (optional)
+            
+        Returns:
+            Context ID
+        """
+        context_id = generate_id()
+        
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """
+            INSERT INTO code_contexts 
+            (id, source_id, session_id, context_text, imports, related_files, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                context_id,
+                source_id,
+                session_id,
+                context_text,
+                json.dumps(imports) if imports else None,
+                json.dumps(related_files) if related_files else None,
+                summary,
+            )
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return context_id
+    
+    def get_code_context(self, source_id: str) -> dict | None:
+        """Get cached code context for a source.
+        
+        Args:
+            source_id: Source ID
+            
+        Returns:
+            Context dict or None if not found
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT * FROM code_contexts WHERE source_id = ? ORDER BY created_at DESC LIMIT 1",
+            (source_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            result = dict(row)
+            if result.get("imports"):
+                result["imports"] = json.loads(result["imports"])
+            if result.get("related_files"):
+                result["related_files"] = json.loads(result["related_files"])
+            return result
+        return None
+    
+    def has_code_context(self, source_id: str) -> bool:
+        """Check if code context exists for a source.
+        
+        Args:
+            source_id: Source ID
+            
+        Returns:
+            True if context exists
+        """
+        conn = self._conn()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT 1 FROM code_contexts WHERE source_id = ? LIMIT 1",
+            (source_id,)
+        )
+        exists = cursor.fetchone() is not None
+        conn.close()
+        
+        return exists

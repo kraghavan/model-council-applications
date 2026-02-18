@@ -8,3 +8,4 @@ council/tasks/__pycache__/
 council/council.yaml
 model_council.egg-info/
 tmp/test-arch
+COMMANDS.md

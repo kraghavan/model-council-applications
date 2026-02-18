@@ -119,6 +119,16 @@ class Deliberation:
             
             all_opinions[round_num] = round_results
             
+            # After round 1: cache code context if deep analysis was used
+            if round_num == 1 and self.storage and source_id:
+                if input_data.get("deep_analysis") and input_data.get("code_context"):
+                    self.storage.save_code_context(
+                        source_id=source_id,
+                        context_text=input_data["code_context"],
+                        summary=f"Deep analysis for {input_data.get('title', 'unknown')}",
+                        session_id=session_id,
+                    )
+            
             # Track opinion changes (round 2+)
             if round_num > 1 and prev_opinions:
                 changes = self._detect_opinion_changes(
