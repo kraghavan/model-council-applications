@@ -929,11 +929,12 @@ class CouncilStorage:
         snippet: Optional[str] = None,
         snippet_hash: Optional[str] = None,
         line_number: Optional[int] = None,
-    ) -> str:
+    ) -> tuple[str, bool]:
         """Save or update an issue fingerprint.
         
-        If fingerprint already exists for scope, updates last_seen and increments occurrences.
-        Otherwise creates new record.
+        If fingerprint already exists for scope:
+        - Same PR: Updates last_seen but does NOT increment occurrences
+        - Different PR: Updates last_seen AND increments occurrences (true recurrence)
         
         Args:
             scope: Repository scope (e.g., 'owner/repo')
@@ -950,22 +951,40 @@ class CouncilStorage:
             line_number: Line number (optional)
             
         Returns:
-            Issue fingerprint record ID
+            Tuple of (record_id, is_recurring)
+            is_recurring is True only if issue was seen in a DIFFERENT PR
         """
         conn = self._conn()
         cursor = conn.cursor()
         
         # Check if fingerprint exists
         cursor.execute(
-            "SELECT id, occurrences FROM issue_fingerprints WHERE scope = ? AND fingerprint = ?",
+            "SELECT id, occurrences, first_seen_pr, last_seen_pr FROM issue_fingerprints WHERE scope = ? AND fingerprint = ?",
             (scope, fingerprint)
         )
         existing = cursor.fetchone()
         
+        is_recurring = False
+        
         if existing:
-            # Update existing
             record_id = existing["id"]
-            occurrences = existing["occurrences"] + 1
+            first_seen_pr = existing["first_seen_pr"]
+            last_seen_pr = existing["last_seen_pr"]
+            current_occurrences = existing["occurrences"]
+            
+            # Only increment occurrences if this is a DIFFERENT PR
+            # (true cross-PR recurrence)
+            if pr_number is not None and first_seen_pr is not None and pr_number != first_seen_pr:
+                # Different PR - this is a true recurring issue
+                is_recurring = True
+                # Only increment if we haven't already counted this PR
+                if last_seen_pr != pr_number:
+                    new_occurrences = current_occurrences + 1
+                else:
+                    new_occurrences = current_occurrences
+            else:
+                # Same PR or unknown - don't increment
+                new_occurrences = current_occurrences
             
             cursor.execute(
                 """
@@ -974,7 +993,7 @@ class CouncilStorage:
                     line_number = ?, updated_at = CURRENT_TIMESTAMP, status = 'open'
                 WHERE id = ?
                 """,
-                (session_id, pr_number, occurrences, line_number, record_id)
+                (session_id, pr_number, new_occurrences, line_number, record_id)
             )
         else:
             # Create new
@@ -995,6 +1014,11 @@ class CouncilStorage:
                     session_id, session_id, pr_number, pr_number,
                 )
             )
+        
+        conn.commit()
+        conn.close()
+        
+        return record_id, is_recurring
         
         conn.commit()
         conn.close()

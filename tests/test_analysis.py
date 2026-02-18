@@ -429,8 +429,29 @@ def login(username):
         assert fp.fingerprint is not None
         assert len(fp.fingerprint) == 16
     
-    def test_format_previous_issues(self):
-        """Test formatting previous issues for prompt."""
+    def test_format_previous_issues_same_pr(self):
+        """Test formatting issues from same PR."""
+        from council.analysis.fingerprint import format_previous_issues
+        
+        issues = [
+            {
+                "file_path": "auth.py",
+                "function_name": "login",
+                "severity": "critical",
+                "issue_description": "SQL injection",
+                "occurrences": 1,
+                "first_seen_pr": 10,
+            },
+        ]
+        
+        result = format_previous_issues(issues, current_pr=10)
+        
+        assert "Unresolved Issues (from this PR)" in result
+        assert "auth.py" in result
+        assert "SQL injection" in result
+    
+    def test_format_previous_issues_cross_pr(self):
+        """Test formatting issues from different PRs."""
         from council.analysis.fingerprint import format_previous_issues
         
         issues = [
@@ -440,23 +461,14 @@ def login(username):
                 "severity": "critical",
                 "issue_description": "SQL injection",
                 "occurrences": 3,
-            },
-            {
-                "file_path": "auth.py",
-                "function_name": "logout",
-                "severity": "minor",
-                "issue_description": "Missing error handling",
-                "occurrences": 1,
+                "first_seen_pr": 5,
             },
         ]
         
-        result = format_previous_issues(issues)
+        result = format_previous_issues(issues, current_pr=10)
         
-        assert "Previous Unresolved Issues" in result
-        assert "auth.py" in result
-        assert "SQL injection" in result
-        assert "login()" in result
-        assert "seen 3x" in result
+        assert "Recurring Issues (from previous PRs)" in result
+        assert "seen in 3 PRs" in result
     
     def test_format_previous_issues_empty(self):
         """Test empty issues returns empty string."""

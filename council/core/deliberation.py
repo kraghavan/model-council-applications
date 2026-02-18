@@ -203,9 +203,11 @@ class Deliberation:
             stats=stats,
         )
         
-        # Add issue summary to stats
+        # Add issue summary and previous issues to stats for display
         if issue_summary:
             result.stats["issues"] = issue_summary
+        if input_data.get("previous_issues"):
+            result.stats["previous_issues"] = input_data["previous_issues"]
         
         return result
     
@@ -476,17 +478,26 @@ Respond with the same JSON format as before. Your score and verdict may change b
             previous_issues: Previously known issues
             
         Returns:
-            Summary dict with new, recurring, fixed counts
+            Summary dict with new, unresolved, recurring, fixed counts
         """
         from council.analysis.fingerprint import create_issue_fingerprint
         
         previous_issues = previous_issues or []
-        previous_fingerprints = {
-            issue.get("fingerprint") for issue in previous_issues if issue.get("fingerprint")
-        }
+        
+        # Build map of previous issues by fingerprint with their PR info
+        previous_by_fp = {}
+        for issue in previous_issues:
+            fp = issue.get("fingerprint")
+            if fp:
+                previous_by_fp[fp] = {
+                    "first_seen_pr": issue.get("first_seen_pr"),
+                    "last_seen_pr": issue.get("last_seen_pr"),
+                    "occurrences": issue.get("occurrences", 1),
+                }
         
         new_count = 0
-        recurring_count = 0
+        unresolved_count = 0  # Same PR, issue still there
+        recurring_count = 0   # Different PR, issue reappeared
         current_fingerprints = set()
         
         for issue in issues:
@@ -509,12 +520,25 @@ Respond with the same JSON format as before. Your score and verdict may change b
             
             current_fingerprints.add(fp.fingerprint)
             
-            # Check if this is a recurring issue
-            is_recurring = fp.fingerprint in previous_fingerprints
+            # Check if this issue was seen before
+            prev_info = previous_by_fp.get(fp.fingerprint)
             
-            if is_recurring:
-                recurring_count += 1
+            if prev_info:
+                # Issue was seen before - is it same PR or different?
+                first_seen_pr = prev_info.get("first_seen_pr")
+                
+                if pr_number is not None and first_seen_pr is not None:
+                    if pr_number == first_seen_pr:
+                        # Same PR, issue still unresolved
+                        unresolved_count += 1
+                    else:
+                        # Different PR, true recurrence
+                        recurring_count += 1
+                else:
+                    # Can't determine, treat as unresolved
+                    unresolved_count += 1
             else:
+                # Brand new issue
                 new_count += 1
             
             # Save/update fingerprint in DB
@@ -549,7 +573,8 @@ Respond with the same JSON format as before. Your score and verdict may change b
         
         return {
             "new": new_count,
-            "recurring": recurring_count,
+            "unresolved": unresolved_count,  # Same PR, still there
+            "recurring": recurring_count,     # Different PR, reappeared
             "fixed": fixed_count,
             "total": len(issues),
         }

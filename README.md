@@ -182,18 +182,27 @@ Model Council tracks issues across reviews using **fingerprinting** — issues a
 ├─────────────────────────────────────────────────────────────────┤
 │  Model finds: "SQL injection in login()"                        │
 │  → Generate fingerprint: hash(file + function + type)          │
-│  → Store as: status='open', occurrences=1                       │
+│  → Store as: status='open', occurrences=1, first_seen_pr=10    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  PR #15: Second Review                                         │
+│  PR #10: Second Review (same PR)                               │
 ├─────────────────────────────────────────────────────────────────┤
-│  Inject previous issues into prompt:                           │
-│  "Please verify if these issues are still present..."          │
-│                                                                 │
+│  Inject: "Unresolved Issues (from this PR)..."                 │
 │  Model finds: Same issue still there                           │
-│  → Update: occurrences=2                                        │
+│  → Status: 'unresolved' (occurrences stays at 1)               │
+│  → Verdict stays consistent: REQUEST_CHANGES                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #15: Different PR, Same Repo                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Inject: "Recurring Issues (from previous PRs)..."             │
+│  Model finds: Same issue reappeared!                           │
+│  → Status: 'recurring', occurrences=2                          │
+│  → This is a cross-PR recurrence                               │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -202,14 +211,22 @@ Model Council tracks issues across reviews using **fingerprinting** — issues a
 ├─────────────────────────────────────────────────────────────────┤
 │  Model: Issue NOT found in this PR                             │
 │  → Mark as: status='fixed'                                     │
+│  → Score improves                                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Example Output
 
 ```
-Issues: 2 new, 1 recurring, 1 fixed
+Issues: 2 new, 1 unresolved, 1 recurring, 1 fixed
 ```
+
+| Status | Meaning |
+|--------|---------|
+| **new** | First time seeing this issue |
+| **unresolved** | Same PR, issue still present |
+| **recurring** | Different PR, issue reappeared |
+| **fixed** | Issue no longer present |
 
 ### Why Fingerprinting?
 
@@ -217,7 +234,7 @@ Issues: 2 new, 1 recurring, 1 fixed
 |------------------------|---------------------|
 | Issue at line 45 | Issue in `login()` function |
 | Code changes → Line 55 | Code changes → Still tracked |
-| System: "New issue" | System: "Recurring (3x)" |
+| System: "New issue" | System: "Same issue" |
 
 ## How Deliberation Works
 

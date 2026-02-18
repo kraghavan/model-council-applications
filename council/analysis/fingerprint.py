@@ -329,11 +329,12 @@ def create_issue_fingerprint(
     )
 
 
-def format_previous_issues(issues: list[dict]) -> str:
+def format_previous_issues(issues: list[dict], current_pr: Optional[int] = None) -> str:
     """Format previous issues for injection into prompt.
     
     Args:
         issues: List of issue dicts from database
+        current_pr: Current PR number (to distinguish same-PR vs cross-PR)
         
     Returns:
         Formatted string for prompt context
@@ -341,37 +342,78 @@ def format_previous_issues(issues: list[dict]) -> str:
     if not issues:
         return ""
     
-    lines = ["\n## Previous Unresolved Issues\n"]
-    lines.append("The following issues were identified in previous reviews and have not been marked as fixed:\n")
+    # Separate same-PR issues from cross-PR issues
+    same_pr_issues = []
+    cross_pr_issues = []
     
-    # Group by file
-    by_file: dict[str, list[dict]] = {}
     for issue in issues:
-        file_path = issue.get('file_path', 'unknown')
-        if file_path not in by_file:
-            by_file[file_path] = []
-        by_file[file_path].append(issue)
+        first_seen_pr = issue.get('first_seen_pr')
+        if current_pr is not None and first_seen_pr is not None and current_pr == first_seen_pr:
+            same_pr_issues.append(issue)
+        else:
+            cross_pr_issues.append(issue)
     
-    for file_path, file_issues in by_file.items():
-        lines.append(f"\n### {file_path}\n")
+    lines = ["\n## Previous Issues\n"]
+    
+    # Cross-PR recurring issues (more serious)
+    if cross_pr_issues:
+        lines.append("### Recurring Issues (from previous PRs)\n")
+        lines.append("These issues were found in previous PRs and may still be present:\n")
         
-        for issue in file_issues:
-            severity = issue.get('severity', 'unknown')
-            severity_emoji = {
-                'critical': '🔴',
-                'major': '🟠',
-                'minor': '🟡',
-                'nit': '⚪',
-            }.get(severity, '❓')
-            
-            func = issue.get('function_name')
-            func_str = f" in `{func}()`" if func else ""
-            
-            occurrences = issue.get('occurrences', 1)
-            occ_str = f" (seen {occurrences}x)" if occurrences > 1 else ""
-            
-            lines.append(f"- {severity_emoji} **{severity}**{func_str}{occ_str}: {issue.get('issue_description', 'No description')}")
+        by_file: dict[str, list[dict]] = {}
+        for issue in cross_pr_issues:
+            file_path = issue.get('file_path', 'unknown')
+            if file_path not in by_file:
+                by_file[file_path] = []
+            by_file[file_path].append(issue)
+        
+        for file_path, file_issues in by_file.items():
+            lines.append(f"\n**{file_path}**")
+            for issue in file_issues:
+                severity = issue.get('severity', 'unknown')
+                severity_emoji = {
+                    'critical': '🔴',
+                    'major': '🟠', 
+                    'minor': '🟡',
+                    'nit': '⚪',
+                }.get(severity, '❓')
+                
+                func = issue.get('function_name')
+                func_str = f" in `{func}()`" if func else ""
+                
+                occurrences = issue.get('occurrences', 1)
+                occ_str = f" (seen in {occurrences} PRs)" if occurrences > 1 else ""
+                
+                lines.append(f"- {severity_emoji} **{severity}**{func_str}{occ_str}: {issue.get('issue_description', 'No description')}")
     
-    lines.append("\n**Please verify if these issues are still present or have been fixed in this PR.**\n")
+    # Same-PR unresolved issues
+    if same_pr_issues:
+        lines.append("\n### Unresolved Issues (from this PR)\n")
+        lines.append("These issues were identified in previous reviews of this PR:\n")
+        
+        by_file: dict[str, list[dict]] = {}
+        for issue in same_pr_issues:
+            file_path = issue.get('file_path', 'unknown')
+            if file_path not in by_file:
+                by_file[file_path] = []
+            by_file[file_path].append(issue)
+        
+        for file_path, file_issues in by_file.items():
+            lines.append(f"\n**{file_path}**")
+            for issue in file_issues:
+                severity = issue.get('severity', 'unknown')
+                severity_emoji = {
+                    'critical': '🔴',
+                    'major': '🟠',
+                    'minor': '🟡',
+                    'nit': '⚪',
+                }.get(severity, '❓')
+                
+                func = issue.get('function_name')
+                func_str = f" in `{func}()`" if func else ""
+                
+                lines.append(f"- {severity_emoji} **{severity}**{func_str}: {issue.get('issue_description', 'No description')}")
+    
+    lines.append("\n**Please verify if these issues are still present or have been fixed.**\n")
     
     return '\n'.join(lines)

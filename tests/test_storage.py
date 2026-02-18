@@ -394,7 +394,7 @@ class TestIssueFingerprints:
         source = storage.create_source("pr-review", "url", scope="owner/repo")
         session = storage.create_session(source.id, ["claude"])
         
-        record_id = storage.save_issue_fingerprint(
+        record_id, is_recurring = storage.save_issue_fingerprint(
             scope="owner/repo",
             fingerprint="abc123",
             file_path="auth.py",
@@ -407,13 +407,15 @@ class TestIssueFingerprints:
         )
         
         assert record_id is not None
+        assert is_recurring is False  # First time seeing this
     
-    def test_save_fingerprint_updates_occurrences(self, storage):
+    def test_save_fingerprint_same_pr_no_increment(self, storage):
+        """Same PR re-review should NOT increment occurrences."""
         source = storage.create_source("pr-review", "url", scope="owner/repo")
         session1 = storage.create_session(source.id, ["claude"])
         session2 = storage.create_session(source.id, ["claude"])
         
-        # First occurrence
+        # First occurrence - PR #10
         storage.save_issue_fingerprint(
             scope="owner/repo",
             fingerprint="abc123",
@@ -421,22 +423,59 @@ class TestIssueFingerprints:
             issue_description="SQL injection",
             severity="critical",
             session_id=session1.id,
+            pr_number=10,
         )
         
-        # Second occurrence - same fingerprint
-        storage.save_issue_fingerprint(
+        # Second review of SAME PR #10 - should NOT increment
+        record_id, is_recurring = storage.save_issue_fingerprint(
             scope="owner/repo",
             fingerprint="abc123",
             file_path="auth.py",
             issue_description="SQL injection",
             severity="critical",
             session_id=session2.id,
+            pr_number=10,
         )
         
-        issues = storage.get_open_issues_for_scope("owner/repo")
+        assert is_recurring is False  # Same PR, not recurring
         
+        issues = storage.get_open_issues_for_scope("owner/repo")
         assert len(issues) == 1
-        assert issues[0]["occurrences"] == 2
+        assert issues[0]["occurrences"] == 1  # Should stay at 1
+    
+    def test_save_fingerprint_different_pr_increments(self, storage):
+        """Different PR should increment occurrences (true recurrence)."""
+        source = storage.create_source("pr-review", "url", scope="owner/repo")
+        session1 = storage.create_session(source.id, ["claude"])
+        session2 = storage.create_session(source.id, ["claude"])
+        
+        # First occurrence - PR #10
+        storage.save_issue_fingerprint(
+            scope="owner/repo",
+            fingerprint="abc123",
+            file_path="auth.py",
+            issue_description="SQL injection",
+            severity="critical",
+            session_id=session1.id,
+            pr_number=10,
+        )
+        
+        # Same issue in DIFFERENT PR #15 - should increment
+        record_id, is_recurring = storage.save_issue_fingerprint(
+            scope="owner/repo",
+            fingerprint="abc123",
+            file_path="auth.py",
+            issue_description="SQL injection",
+            severity="critical",
+            session_id=session2.id,
+            pr_number=15,
+        )
+        
+        assert is_recurring is True  # Different PR = recurring
+        
+        issues = storage.get_open_issues_for_scope("owner/repo")
+        assert len(issues) == 1
+        assert issues[0]["occurrences"] == 2  # Should be 2
     
     def test_get_open_issues_for_scope(self, storage):
         source = storage.create_source("pr-review", "url", scope="owner/repo")
@@ -536,6 +575,7 @@ class TestIssueFingerprints:
             issue_description="Critical issue",
             severity="critical",
             session_id=session.id,
+            pr_number=10,
         )
         
         storage.save_issue_fingerprint(
@@ -545,9 +585,10 @@ class TestIssueFingerprints:
             issue_description="Major issue",
             severity="major",
             session_id=session.id,
+            pr_number=10,
         )
         
-        # Make fp2 recurring
+        # Make fp2 recurring by seeing it in a DIFFERENT PR
         storage.save_issue_fingerprint(
             scope="owner/repo",
             fingerprint="fp2",
@@ -555,6 +596,7 @@ class TestIssueFingerprints:
             issue_description="Major issue",
             severity="major",
             session_id=session.id,
+            pr_number=15,  # Different PR = true recurrence
         )
         
         # Fix one
@@ -564,4 +606,4 @@ class TestIssueFingerprints:
         
         assert stats["open"] == 1
         assert stats["fixed"] == 1
-        assert stats["recurring"] == 1  # fp2 seen twice
+        assert stats["recurring"] == 1  # fp2 seen in 2 different PRs

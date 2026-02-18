@@ -19,7 +19,7 @@ from council.tasks import get_task, list_tasks
 console = Console()
 
 
-def format_verdict(result: DeliberationResult, task_name: str) -> None:
+def format_verdict(result: DeliberationResult, task_name: str, newer_issues_only: bool = False) -> None:
     """Pretty print the deliberation result."""
     verdict = result.verdict
     
@@ -88,44 +88,93 @@ def format_verdict(result: DeliberationResult, task_name: str) -> None:
         
         console.print(table)
     
-    # Issues table
-    if verdict.issues:
-        # Show issue tracking summary if available
-        if result.stats and result.stats.get("issues"):
-            issue_stats = result.stats["issues"]
-            summary_parts = []
-            if issue_stats.get("new", 0) > 0:
-                summary_parts.append(f"[cyan]{issue_stats['new']} new[/]")
-            if issue_stats.get("recurring", 0) > 0:
-                summary_parts.append(f"[yellow]{issue_stats['recurring']} recurring[/]")
-            if issue_stats.get("fixed", 0) > 0:
-                summary_parts.append(f"[green]{issue_stats['fixed']} fixed[/]")
+    # Issues table - merge previous + new
+    issue_stats = result.stats.get("issues", {}) if result.stats else {}
+    previous_issues = result.stats.get("previous_issues", []) if result.stats else []
+    
+    # Build merged issues list
+    all_issues = []
+    new_fingerprints = set()
+    
+    # Add new issues from verdict
+    for issue in (verdict.issues or []):
+        all_issues.append({
+            **issue,
+            "_status": "NEW",
+        })
+        # Track fingerprint if available
+        if issue.get("_fingerprint"):
+            new_fingerprints.add(issue["_fingerprint"])
+    
+    # Add carried-over issues from previous (unless --newer-issues)
+    if not newer_issues_only and previous_issues:
+        for prev in previous_issues:
+            # Check if this issue was re-found (avoid duplicates)
+            # Simple heuristic: same file + similar description
+            is_duplicate = False
+            for new_issue in verdict.issues or []:
+                if (prev.get("file_path") == new_issue.get("file") and 
+                    prev.get("severity") == new_issue.get("severity")):
+                    is_duplicate = True
+                    break
             
-            if summary_parts:
-                console.print(f"\n[bold]Issues:[/] {', '.join(summary_parts)}")
-            else:
-                console.print("\n[bold]Key Issues:[/]")
+            if not is_duplicate and prev.get("status") == "open":
+                all_issues.append({
+                    "severity": prev.get("severity", "minor"),
+                    "file": prev.get("file_path"),
+                    "line": prev.get("line_number"),
+                    "description": prev.get("issue_description"),
+                    "raised_by": ["previous"],
+                    "_status": "CARRIED",
+                })
+    
+    if all_issues:
+        # Show issue tracking summary
+        summary_parts = []
+        new_count = issue_stats.get("new", 0)
+        unresolved_count = issue_stats.get("unresolved", 0)
+        recurring_count = issue_stats.get("recurring", 0)
+        fixed_count = issue_stats.get("fixed", 0)
+        carried_count = len([i for i in all_issues if i.get("_status") == "CARRIED"])
+        
+        if new_count > 0:
+            summary_parts.append(f"[cyan]{new_count} new[/]")
+        if carried_count > 0:
+            summary_parts.append(f"[yellow]{carried_count} carried[/]")
+        if unresolved_count > 0:
+            summary_parts.append(f"[yellow]{unresolved_count} unresolved[/]")
+        if recurring_count > 0:
+            summary_parts.append(f"[red]{recurring_count} recurring[/]")
+        if fixed_count > 0:
+            summary_parts.append(f"[green]{fixed_count} fixed[/]")
+        
+        if summary_parts:
+            console.print(f"\n[bold]Issues:[/] {', '.join(summary_parts)}")
         else:
-            console.print("\n[bold]Key Issues:[/]")
+            console.print("\n[bold]Issues:[/]")
         
         table = Table(show_header=True, header_style="bold", expand=True)
         table.add_column("Severity", width=10)
         table.add_column("Location", no_wrap=False)
         table.add_column("Issue", no_wrap=False)
-        table.add_column("Flagged By", width=15)
+        table.add_column("Status", width=10)
         
         colors = {"critical": "red", "major": "yellow", "minor": "cyan", "nit": "dim"}
+        status_colors = {"NEW": "cyan", "CARRIED": "yellow", "FIXED": "green"}
         
-        for issue in verdict.issues[:10]:
+        for issue in all_issues[:15]:  # Limit to 15
             sev = issue.get("severity", "minor")
             loc = issue.get("file") or "-"
             if issue.get("line"):
                 loc = f"{loc}:{issue['line']}"
+            status = issue.get("_status", "NEW")
+            status_color = status_colors.get(status, "white")
+            
             table.add_row(
                 f"[{colors.get(sev, 'white')}]{sev}[/]",
                 loc,
                 issue.get("description", ""),
-                ", ".join(issue.get("raised_by", [])),
+                f"[{status_color}]{status}[/]",
             )
         
         console.print(table)
@@ -277,8 +326,9 @@ def init_command(force: bool):
 @click.option("--rounds", "-r", type=int, default=None, help="Number of deliberation rounds (default: from config)")
 @click.option("--deep", "-d", is_flag=True, help="Deep analysis: fetch code context and suggest patterns")
 @click.option("--fresh", is_flag=True, help="Force fresh context fetch (ignore cache)")
+@click.option("--newer-issues", is_flag=True, help="Only show new issues (hide carried-over issues)")
 @click.option("--json", "output_json", is_flag=True, help="Output JSON")
-def pr_review(pr_url: str, models: str | None, files: str | None, rounds: int | None, deep: bool, fresh: bool, output_json: bool):
+def pr_review(pr_url: str, models: str | None, files: str | None, rounds: int | None, deep: bool, fresh: bool, newer_issues: bool, output_json: bool):
     """Review a GitHub pull request.
     
     PR_URL: GitHub PR URL or owner/repo#number
@@ -294,12 +344,14 @@ def pr_review(pr_url: str, models: str | None, files: str | None, rounds: int | 
         council pr-review owner/repo#123 --deep
         
         council pr-review owner/repo#123 --deep --fresh
+        
+        council pr-review owner/repo#123 --newer-issues
     """
     file_filter = None
     if files:
         file_filter = [f.strip() for f in files.split(",")]
     
-    _run_task("pr-review", pr_url, models, output_json, file_filter=file_filter, rounds=rounds, deep_analysis=deep, fresh=fresh)
+    _run_task("pr-review", pr_url, models, output_json, file_filter=file_filter, rounds=rounds, deep_analysis=deep, fresh=fresh, newer_issues_only=newer_issues)
 
 
 @main.command("architecture")
@@ -353,6 +405,7 @@ def _run_task(
     rounds: int | None = None,
     deep_analysis: bool = False,
     fresh: bool = False,
+    newer_issues_only: bool = False,
 ):
     """Internal task runner."""
     settings = get_settings()
@@ -406,7 +459,7 @@ def _run_task(
             }
             console.print_json(json.dumps(output))
         else:
-            format_verdict(result, task_name)
+            format_verdict(result, task_name, newer_issues_only=newer_issues_only)
             
     except ValueError as e:
         console.print(f"[red]Error:[/] {e}")

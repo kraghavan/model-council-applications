@@ -331,7 +331,8 @@ Use this context to:
         # Add previous unresolved issues
         if input_data.get("previous_issues"):
             from council.analysis.fingerprint import format_previous_issues
-            previous_issues_text = format_previous_issues(input_data["previous_issues"])
+            current_pr = input_data.get("number")
+            previous_issues_text = format_previous_issues(input_data["previous_issues"], current_pr)
             if previous_issues_text:
                 user_prompt += f"""
 
