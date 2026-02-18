@@ -90,6 +90,9 @@ council pr-review owner/repo#123 --deep
 # Combine all options
 council pr-review owner/repo#123 --deep --rounds 2 --files "auth.py"
 
+# Only show new issues (hide carried-over from previous reviews)
+council pr-review owner/repo#123 --newer-issues
+
 # Review architecture
 council architecture ./design.mermaid
 council architecture ./docs --files "system.mermaid,api.mermaid"

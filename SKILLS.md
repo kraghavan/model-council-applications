@@ -174,6 +174,7 @@ deliberation:
 | Multi-model | `council pr-review url -m claude,gemini,openai` |
 | Deep analysis | `council pr-review url --deep` |
 | Fresh context | `council pr-review url --deep --fresh` |
+| New issues only | `council pr-review url --newer-issues` |
 | Full analysis | `council pr-review url --deep --rounds 2` |
 | Architecture | `council architecture ./docs` |
 
