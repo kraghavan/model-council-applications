@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "model-council"
-version = "2.0.0"
-description = "Multi-model AI council framework with deliberation and memory"
+version = "2.1.0"
+description = "Multi-model AI council framework with deliberation, memory, and deep analysis"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

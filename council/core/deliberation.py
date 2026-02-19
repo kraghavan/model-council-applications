@@ -78,12 +78,13 @@ class Deliberation:
         # Create source and session in storage
         source_id = None
         session_id = None
+        scope = self._extract_scope(input_data)
         
         if self.storage:
             source = self.storage.create_source(
                 task_type=self.task.name,
                 source_ref=input_data.get("url") or input_data.get("source", "unknown"),
-                scope=self._extract_scope(input_data),
+                scope=scope,
                 title=input_data.get("title"),
                 raw_content=input_data.get("diff") or input_data.get("content"),
                 metadata={k: v for k, v in input_data.items() 
@@ -97,6 +98,14 @@ class Deliberation:
                 max_rounds=self.config.rounds,
             )
             session_id = session.id
+            
+            # Fetch previous unresolved issues for this scope/files
+            previous_issues = self._fetch_previous_issues(
+                scope=scope,
+                files=input_data.get("files_reviewed"),
+            )
+            if previous_issues:
+                input_data["previous_issues"] = previous_issues
         else:
             session_id = "no-storage"
         
@@ -118,6 +127,16 @@ class Deliberation:
             )
             
             all_opinions[round_num] = round_results
+            
+            # After round 1: cache code context if deep analysis was used
+            if round_num == 1 and self.storage and source_id:
+                if input_data.get("deep_analysis") and input_data.get("code_context"):
+                    self.storage.save_code_context(
+                        source_id=source_id,
+                        context_text=input_data["code_context"],
+                        summary=f"Deep analysis for {input_data.get('title', 'unknown')}",
+                        session_id=session_id,
+                    )
             
             # Track opinion changes (round 2+)
             if round_num > 1 and prev_opinions:
@@ -146,6 +165,8 @@ class Deliberation:
         
         # Get stats and save verdict
         stats = {}
+        issue_summary = {}
+        
         if self.storage:
             stats = self.storage.get_session_stats(session_id)
             
@@ -161,15 +182,34 @@ class Deliberation:
                 total_rounds=final_round,
             )
             
+            # Process and store issue fingerprints
+            if scope and verdict.issues:
+                issue_summary = self._process_issues(
+                    scope=scope,
+                    issues=verdict.issues,
+                    session_id=session_id,
+                    pr_number=input_data.get("number"),
+                    diff_content=input_data.get("diff"),
+                    previous_issues=input_data.get("previous_issues", []),
+                )
+            
             self.storage.complete_session(session_id)
         
-        return DeliberationResult(
+        result = DeliberationResult(
             session_id=session_id,
             verdict=verdict,
             total_rounds=final_round,
             opinion_changes=opinion_changes,
             stats=stats,
         )
+        
+        # Add issue summary and previous issues to stats for display
+        if issue_summary:
+            result.stats["issues"] = issue_summary
+        if input_data.get("previous_issues"):
+            result.stats["previous_issues"] = input_data["previous_issues"]
+        
+        return result
     
     async def _run_round(
         self,
@@ -391,6 +431,159 @@ Respond with the same JSON format as before. Your score and verdict may change b
             return f"{input_data['owner']}/{input_data['repo']}"
         
         return input_data.get("scope")
+    
+    def _fetch_previous_issues(
+        self,
+        scope: Optional[str],
+        files: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Fetch previous unresolved issues for the scope/files.
+        
+        Args:
+            scope: Repository scope
+            files: Optional list of files being reviewed
+            
+        Returns:
+            List of previous issue dicts
+        """
+        if not self.storage or not scope:
+            return []
+        
+        try:
+            if files:
+                return self.storage.get_open_issues_for_scope(scope, file_paths=files)
+            else:
+                return self.storage.get_open_issues_for_scope(scope)
+        except Exception:
+            # Table might not exist yet
+            return []
+    
+    def _process_issues(
+        self,
+        scope: str,
+        issues: list[dict],
+        session_id: str,
+        pr_number: Optional[int] = None,
+        diff_content: Optional[str] = None,
+        previous_issues: list[dict] = None,
+    ) -> dict:
+        """Process issues from verdict and save fingerprints.
+        
+        Args:
+            scope: Repository scope
+            issues: Issues from verdict
+            session_id: Current session ID
+            pr_number: PR number
+            diff_content: Diff content for function extraction
+            previous_issues: Previously known issues
+            
+        Returns:
+            Summary dict with new, unresolved, recurring, fixed counts
+        """
+        from council.analysis.fingerprint import create_issue_fingerprint
+        
+        previous_issues = previous_issues or []
+        
+        # Build map of previous issues by fingerprint with their PR info
+        previous_by_fp = {}
+        for issue in previous_issues:
+            fp = issue.get("fingerprint")
+            if fp:
+                previous_by_fp[fp] = {
+                    "first_seen_pr": issue.get("first_seen_pr"),
+                    "last_seen_pr": issue.get("last_seen_pr"),
+                    "occurrences": issue.get("occurrences", 1),
+                }
+        
+        new_count = 0
+        unresolved_count = 0  # Same PR, issue still there
+        recurring_count = 0   # Different PR, issue reappeared
+        current_fingerprints = set()
+        enriched_issues = []  # Issues with status attached
+        
+        for issue in issues:
+            file_path = issue.get("file") or "unknown"
+            line_number = issue.get("line")
+            description = issue.get("description") or ""
+            severity = issue.get("severity", "minor")
+            
+            if not description:
+                continue
+            
+            # Create fingerprint
+            fp = create_issue_fingerprint(
+                file_path=file_path,
+                line_number=line_number,
+                description=description,
+                severity=severity,
+                file_content=diff_content,
+            )
+            
+            current_fingerprints.add(fp.fingerprint)
+            
+            # Check if this issue was seen before
+            prev_info = previous_by_fp.get(fp.fingerprint)
+            
+            if prev_info:
+                # Issue was seen before - is it same PR or different?
+                first_seen_pr = prev_info.get("first_seen_pr")
+                
+                if pr_number is not None and first_seen_pr is not None:
+                    if pr_number == first_seen_pr:
+                        # Same PR, issue still unresolved
+                        status = "UNRESOLVED"
+                        unresolved_count += 1
+                    else:
+                        # Different PR, true recurrence
+                        status = "RECURRING"
+                        recurring_count += 1
+                else:
+                    # Can't determine, treat as unresolved
+                    status = "UNRESOLVED"
+                    unresolved_count += 1
+            else:
+                # Brand new issue
+                status = "NEW"
+                new_count += 1
+            
+            # Add enriched issue with status
+            enriched_issues.append({
+                **issue,
+                "_status": status,
+                "_fingerprint": fp.fingerprint,
+            })
+            
+            # Save/update fingerprint in DB
+            try:
+                self.storage.save_issue_fingerprint(
+                    scope=scope,
+                    fingerprint=fp.fingerprint,
+                    file_path=fp.file_path,
+                    issue_description=fp.issue_description,
+                    severity=fp.severity,
+                    session_id=session_id,
+                    pr_number=pr_number,
+                    function_name=fp.function_name,
+                    issue_type=fp.issue_type,
+                    snippet=fp.snippet,
+                    snippet_hash=fp.snippet_hash,
+                    line_number=fp.line_number,
+                )
+            except Exception:
+                pass  # Best effort
+        
+        # DON'T mark issues as "fixed" just because model didn't mention them
+        # Models find different issues each run - not finding one doesn't mean fixed
+        # Issues should only be marked fixed when PR is merged or explicitly confirmed
+        
+        return {
+            "new": new_count,
+            "unresolved": unresolved_count,  # Same PR, still there
+            "recurring": recurring_count,     # Different PR, reappeared
+            "fixed": 0,  # Don't auto-mark fixed
+            "total": len(issues),
+            "enriched_issues": enriched_issues,
+        }
 
 
 async def run_deliberation(

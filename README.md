@@ -84,6 +84,15 @@ council pr-review owner/repo#123 --rounds 2
 # Review specific files only
 council pr-review owner/repo#123 --files "auth.py,utils.py"
 
+# Deep analysis (fetches code context)
+council pr-review owner/repo#123 --deep
+
+# Force fresh context (bypass cache)
+council pr-review owner/repo#123 --deep --fresh
+
+# Combine all options
+council pr-review owner/repo#123 --deep --rounds 2 --files "auth.py"
+
 # Review architecture
 council architecture ./design.mermaid
 council architecture ./docs --files "system.mermaid,api.mermaid"
@@ -93,6 +102,141 @@ council models    # Show configured models
 council history   # Show past reviews
 council stats     # Show statistics
 ```
+
+## Deep Analysis Mode
+
+Use `--deep` for enhanced reviews with code context:
+
+```bash
+council pr-review owner/repo#123 --deep
+```
+
+### Flag Behavior
+
+| Command | What Happens |
+|---------|--------------|
+| `council pr-review url` | Basic review — just the diff, no context fetching |
+| `council pr-review url --deep` | Deep analysis — use cache if fresh, else fetch new |
+| `council pr-review url --deep --fresh` | Deep analysis — always fetch new, ignore cache |
+| `council pr-review url --rounds 2` | Multi-round deliberation, no deep analysis |
+| `council pr-review url --deep --rounds 2` | Both — deep + multi-round |
+
+**Key point:** Without `--deep`, no context fetching happens at all.
+
+### What Deep Analysis Does
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  DEEP ANALYSIS FLOW                                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Parse diff → Extract imports                                │
+│  2. Identify dependencies (non-stdlib)                          │
+│  3. Check cache: Have we analyzed this repo before?             │
+│     └── YES: Reuse cached context (faster, no extra API calls)  │
+│     └── NO:  Fetch related source files from GitHub             │
+│  4. Store context in DB for future use                          │
+│  5. Inject context into prompt                                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Context Caching
+
+Deep analysis context is **cached per repository** with a configurable TTL:
+
+| PR # | What Happens |
+|------|--------------|
+| First PR | Fetches related files → Stores in DB |
+| Second PR (within TTL) | Reuses cached context → Faster |
+| PR after TTL expires | Fetches fresh → Updates cache |
+| Any PR with `--fresh` | Always fetches fresh → Updates cache |
+
+**Configure TTL:**
+
+```bash
+# .env (Docker-friendly)
+COUNCIL_CONTEXT_CACHE_TTL=3600   # Seconds (default: 1 hour)
+```
+
+Or in `council.yaml`:
+
+```yaml
+cache:
+  context_ttl_seconds: 3600  # 1 hour
+```
+
+### Enhanced Output
+
+With `--deep`, models also suggest:
+- Design patterns observed or recommended
+- Performance optimizations
+- Code consistency with existing patterns
+
+## Issue Tracking
+
+Model Council tracks issues across reviews using **fingerprinting** — issues are identified by function and type, not just line number.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #10: First Review                                          │
+├─────────────────────────────────────────────────────────────────┤
+│  Model finds: "SQL injection in login()"                        │
+│  → Generate fingerprint: hash(file + function + type)          │
+│  → Store as: status='open', occurrences=1, first_seen_pr=10    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #10: Second Review (same PR)                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Inject: "Unresolved Issues (from this PR)..."                 │
+│  Model finds: Same issue still there                           │
+│  → Status: 'unresolved' (occurrences stays at 1)               │
+│  → Verdict stays consistent: REQUEST_CHANGES                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #15: Different PR, Same Repo                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Inject: "Recurring Issues (from previous PRs)..."             │
+│  Model finds: Same issue reappeared!                           │
+│  → Status: 'recurring', occurrences=2                          │
+│  → This is a cross-PR recurrence                               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PR #20: Issue Fixed                                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Model: Issue NOT found in this PR                             │
+│  → Mark as: status='fixed'                                     │
+│  → Score improves                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Example Output
+
+```
+Issues: 3 new, 4 unresolved
+```
+
+| Status | Meaning |
+|--------|---------|
+| **NEW** | First time seeing this issue |
+| **UNRESOLVED** | Same PR, issue still present |
+| **RECURRING** | Different PR, issue reappeared |
+
+### Why Fingerprinting?
+
+| Without Fingerprinting | With Fingerprinting |
+|------------------------|---------------------|
+| Issue at line 45 | Issue in `login()` function |
+| Code changes → Line 55 | Code changes → Still tracked |
+| System: "New issue" | System: "Same issue" |
 
 ## How Deliberation Works
 
@@ -278,6 +422,17 @@ Model Council uses SQLite with [sqlite-vec](https://github.com/asg017/sqlite-vec
 | Groq | Groq | `GROQ_API_KEY` |
 | Ollama | Local | Ollama running locally |
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [README.md](README.md) | Quick start and overview |
+| [SKILLS.md](SKILLS.md) | Capabilities and use cases |
+| [CLAUDE.md](CLAUDE.md) | Project context for AI assistants |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
+| [docs/SCHEMA.md](docs/SCHEMA.md) | Database schema reference |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture diagrams |
+
 ## Development
 
 ```bash
@@ -290,13 +445,6 @@ pytest tests/ -v
 # Lint
 ruff check council/ tests/
 ```
-
-## Roadmap
-
-- [x] v1.0 — Multi-model PR review
-- [x] v1.2 — Selective file review
-- [x] v2.0 — Memory DB + deliberation
-... 
 
 ## License
 

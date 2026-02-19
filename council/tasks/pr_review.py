@@ -15,12 +15,20 @@ class PRReviewTask(BaseTask):
     name = "pr-review"
     description = "Review GitHub pull requests for code quality, bugs, and best practices"
 
-    async def fetch_input(self, source: str, file_filter: list[str] | None = None) -> dict:
+    async def fetch_input(
+        self,
+        source: str,
+        file_filter: list[str] | None = None,
+        deep_analysis: bool = False,
+        fresh: bool = False,
+    ) -> dict:
         """Fetch PR data from GitHub.
         
         Args:
             source: PR URL (full URL or owner/repo#number format)
             file_filter: Optional list of files to review (exits if not in PR)
+            deep_analysis: If True, fetch additional code context
+            fresh: If True, ignore cache and fetch fresh context
         """
         owner, repo, number = self._parse_pr_url(source)
         settings = get_settings()
@@ -72,12 +80,75 @@ class PRReviewTask(BaseTask):
             diff = full_diff
             filtered_files = files_in_pr
         
+        # Deep analysis: fetch code context (or use cached if fresh and within TTL)
+        code_context = None
+        code_context_text = ""
+        context_from_cache = False
+        
+        if deep_analysis:
+            try:
+                from datetime import datetime, timedelta
+                from council.db.storage import CouncilStorage
+                from council.analysis.code_context import CodeContextAnalyzer, format_code_context
+                
+                storage = None
+                try:
+                    storage = CouncilStorage()
+                except:
+                    pass  # DB might not be initialized
+                
+                # Check if we have valid cached context (unless --fresh)
+                cached_context = None
+                if storage and not fresh:
+                    # Look for recent context from same repo within TTL
+                    conn = storage._conn()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        SELECT cc.context_text, cc.summary, cc.created_at
+                        FROM code_contexts cc
+                        JOIN sources s ON cc.source_id = s.id
+                        WHERE s.scope = ?
+                        ORDER BY cc.created_at DESC
+                        LIMIT 1
+                        """,
+                        (f"{owner}/{repo}",)
+                    )
+                    row = cursor.fetchone()
+                    conn.close()
+                    
+                    if row and row["context_text"]:
+                        # Check TTL
+                        created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")) if isinstance(row["created_at"], str) else row["created_at"]
+                        cache_age_seconds = (datetime.now() - created_at.replace(tzinfo=None)).total_seconds()
+                        
+                        if cache_age_seconds < settings.context_cache_ttl:
+                            cached_context = row["context_text"]
+                
+                # Use cached or fetch new
+                if cached_context:
+                    code_context_text = cached_context
+                    context_from_cache = True
+                else:
+                    # Fetch fresh context
+                    analyzer = CodeContextAnalyzer(
+                        owner=owner,
+                        repo=repo,
+                        branch=pr_data["base"]["ref"],
+                    )
+                    code_context = await analyzer.analyze_diff(diff)
+                    code_context_text = format_code_context(code_context)
+                    
+            except Exception as e:
+                # Don't fail if deep analysis fails
+                code_context_text = f"<!-- Deep analysis unavailable: {e} -->"
+        
         # Truncate large diffs
-        max_chars = 50000
+        max_chars = 50000 if not deep_analysis else 30000  # Less diff space when using context
         if len(diff) > max_chars:
             diff = diff[:max_chars] + "\n\n... [truncated] ..."
         
-        return {
+        result = {
             "owner": owner,
             "repo": repo,
             "number": number,
@@ -90,7 +161,14 @@ class PRReviewTask(BaseTask):
             "diff": diff,
             "files_reviewed": filtered_files,
             "total_files_in_pr": len(files_in_pr),
+            "deep_analysis": deep_analysis,
+            "context_from_cache": context_from_cache,
         }
+        
+        if code_context_text:
+            result["code_context"] = code_context_text
+        
+        return result
 
     def _parse_files_from_diff(self, diff: str) -> list[str]:
         """Extract list of files from a unified diff."""
@@ -190,6 +268,8 @@ class PRReviewTask(BaseTask):
 
     def build_prompt(self, input_data: dict) -> tuple[str, str]:
         """Build PR review prompts."""
+        is_deep = input_data.get("deep_analysis", False)
+        
         # Show which files are being reviewed
         files_info = ""
         if input_data.get("files_reviewed"):
@@ -201,6 +281,7 @@ class PRReviewTask(BaseTask):
             else:
                 files_info = f"\n**Files:** {', '.join(files_reviewed)}"
         
+        # Base system prompt
         system_prompt = """You are an expert code reviewer participating in a council of AI reviewers.
 Your job is to analyze pull requests and provide honest, constructive feedback.
 
@@ -210,10 +291,24 @@ Focus on:
 - Performance concerns
 - Code clarity and maintainability
 - Test coverage gaps
-- API design issues
+- API design issues"""
+        
+        # Enhanced system prompt for deep analysis
+        if is_deep:
+            system_prompt += """
 
-Be direct and specific. Respond ONLY with valid JSON."""
-
+DEEP ANALYSIS MODE:
+You have been provided with additional code context including related source files.
+Use this context to:
+- Understand how changes fit into the broader codebase
+- Identify potential breaking changes to dependent code
+- Suggest better design patterns if applicable
+- Check consistency with existing code style and patterns
+- Recommend performance optimizations based on usage patterns"""
+        
+        system_prompt += "\n\nBe direct and specific. Respond ONLY with valid JSON."
+        
+        # Build user prompt
         user_prompt = f"""Review this pull request and provide your assessment.
 
 ## Pull Request
@@ -225,25 +320,59 @@ Be direct and specific. Respond ONLY with valid JSON."""
 ## Diff
 ```diff
 {input_data['diff']}
-```
+```"""
+        
+        # Add code context for deep analysis
+        if is_deep and input_data.get("code_context"):
+            user_prompt += f"""
 
-## Instructions
-Respond with ONLY valid JSON (no markdown, no explanation):
+{input_data['code_context']}"""
+        
+        # Add previous unresolved issues
+        if input_data.get("previous_issues"):
+            from council.analysis.fingerprint import format_previous_issues
+            current_pr = input_data.get("number")
+            previous_issues_text = format_previous_issues(input_data["previous_issues"], current_pr)
+            if previous_issues_text:
+                user_prompt += f"""
 
-{{
+{previous_issues_text}"""
+        
+        # JSON response format
+        json_fields = """
+{
     "score": <float 0.0-1.0>,
     "verdict": "<APPROVE|REQUEST_CHANGES|COMMENT>",
     "summary": "<one paragraph assessment>",
     "issues": [
-        {{
+        {
             "severity": "<critical|major|minor|nit>",
             "file": "<filename or null>",
             "line": <line number or null>,
             "description": "<what's wrong and how to fix>"
-        }}
+        }
     ],
-    "positives": ["<good things about this PR>"]
-}}
+    "positives": ["<good things about this PR>"]"""
+        
+        # Extra fields for deep analysis
+        if is_deep:
+            json_fields += """,
+    "patterns": ["<design patterns observed or recommended>"],
+    "optimizations": [
+        {
+            "type": "<performance|pattern|readability>",
+            "description": "<what could be improved>",
+            "impact": "<high|medium|low>"
+        }
+    ]"""
+        
+        json_fields += "\n}"
+        
+        user_prompt += f"""
+
+## Instructions
+Respond with ONLY valid JSON (no markdown, no explanation):
+{json_fields}
 
 Scoring:
 - 0.9-1.0: Excellent, ready to merge

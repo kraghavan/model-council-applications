@@ -29,10 +29,15 @@ council/
 ├── db/
 │   ├── schema.py       # SQLite table definitions
 │   └── storage.py      # CRUD operations
-└── tasks/
-    ├── base.py         # Abstract BaseTask
-    ├── pr_review.py    # GitHub PR review
-    └── architecture.py # Architecture review
+├── tasks/
+│   ├── base.py         # Abstract BaseTask
+│   ├── pr_review.py    # GitHub PR review
+│   └── architecture.py # Architecture review
+└── analysis/           # v2.1.0
+    ├── fingerprint.py  # Issue tracking across PRs
+    ├── code_context.py # Deep analysis (imports, related files)
+    ├── embeddings.py   # Vector embeddings
+    └── similarity.py   # Find similar past reviews
 ```
 
 ## Database Schema
@@ -47,6 +52,12 @@ See [docs/SCHEMA.md](docs/SCHEMA.md) for full documentation.
 - `verdicts` — Final decisions
 - `observations` — Token/latency tracking
 - `opinion_changes` — How opinions evolved
+
+**v2.1.0 tables:**
+- `issue_fingerprints` — Track issues across PRs by function/type
+- `code_contexts` — Cached deep analysis results
+- `source_embeddings` — Vector embeddings for similarity
+- `long_term_memory` — Patterns and decisions
 
 ## Key Files to Understand
 
@@ -124,12 +135,14 @@ pytest tests/ -v
 ruff check council/
 
 # Usage
-council init                          # Initialize DB
-council pr-review owner/repo#123      # Review PR
-council pr-review url --rounds 2      # Multi-round
-council architecture ./docs           # Review architecture
-council history                        # Past reviews
-council stats <session_id>            # Session details
+council init                              # Initialize DB
+council pr-review owner/repo#123          # Review PR
+council pr-review url --rounds 2          # Multi-round
+council pr-review url --deep              # Deep analysis (imports, context)
+council pr-review url --deep --fresh      # Force fresh context fetch
+council architecture ./docs               # Review architecture
+council history                           # Past reviews
+council stats <session_id>                # Session details
 ```
 
 ## Configuration Priority
@@ -138,14 +151,6 @@ council stats <session_id>            # Session details
 CLI flags > ENV vars > council.yaml > defaults
 ```
 
-## Roadmap
-
-| Version | Features | Status |
-|---------|----------|--------|
-| v1.0.0 | Core multi-model review | ✅ |
-| v1.2.0 | Selective file review | ✅ |
-| v2.0.0 | Memory DB + deliberation | ✅ |
-...
 ## Testing
 
 ```bash
@@ -164,5 +169,5 @@ pytest tests/ --cov=council
 - Python 3.10+
 - Type hints required
 - Async/await for I/O
-- Ruff for linting # disabled TBFL
+- Ruff for linting
 - Dataclasses for models
