@@ -1,7 +1,6 @@
 .DS_Store
 old/
 .env
-
 council/__pycache__/
 council/core/__pycache__/
 council/tasks/__pycache__/
@@ -10,3 +9,6 @@ model_council.egg-info/
 tmp/test-arch
 COMMANDS.md
 FEEDBACK.md
+tests/__pycache__/
+council/db/__pycache__/
+council/analysis/__pycache__/

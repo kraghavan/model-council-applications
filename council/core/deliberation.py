@@ -499,6 +499,7 @@ Respond with the same JSON format as before. Your score and verdict may change b
         unresolved_count = 0  # Same PR, issue still there
         recurring_count = 0   # Different PR, issue reappeared
         current_fingerprints = set()
+        enriched_issues = []  # Issues with status attached
         
         for issue in issues:
             file_path = issue.get("file") or "unknown"
@@ -530,16 +531,27 @@ Respond with the same JSON format as before. Your score and verdict may change b
                 if pr_number is not None and first_seen_pr is not None:
                     if pr_number == first_seen_pr:
                         # Same PR, issue still unresolved
+                        status = "UNRESOLVED"
                         unresolved_count += 1
                     else:
                         # Different PR, true recurrence
+                        status = "RECURRING"
                         recurring_count += 1
                 else:
                     # Can't determine, treat as unresolved
+                    status = "UNRESOLVED"
                     unresolved_count += 1
             else:
                 # Brand new issue
+                status = "NEW"
                 new_count += 1
+            
+            # Add enriched issue with status
+            enriched_issues.append({
+                **issue,
+                "_status": status,
+                "_fingerprint": fp.fingerprint,
+            })
             
             # Save/update fingerprint in DB
             try:
@@ -560,23 +572,17 @@ Respond with the same JSON format as before. Your score and verdict may change b
             except Exception:
                 pass  # Best effort
         
-        # Mark issues as fixed if they weren't found this time
-        fixed_count = 0
-        for prev_issue in previous_issues:
-            prev_fp = prev_issue.get("fingerprint")
-            if prev_fp and prev_fp not in current_fingerprints:
-                try:
-                    if self.storage.mark_issue_fixed(scope, prev_fp, session_id):
-                        fixed_count += 1
-                except Exception:
-                    pass
+        # DON'T mark issues as "fixed" just because model didn't mention them
+        # Models find different issues each run - not finding one doesn't mean fixed
+        # Issues should only be marked fixed when PR is merged or explicitly confirmed
         
         return {
             "new": new_count,
             "unresolved": unresolved_count,  # Same PR, still there
             "recurring": recurring_count,     # Different PR, reappeared
-            "fixed": fixed_count,
+            "fixed": 0,  # Don't auto-mark fixed
             "total": len(issues),
+            "enriched_issues": enriched_issues,
         }
 
 

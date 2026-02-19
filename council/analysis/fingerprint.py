@@ -239,31 +239,28 @@ def generate_fingerprint(
 ) -> str:
     """Generate a unique fingerprint for an issue.
     
-    The fingerprint is stable across line number changes as long as
-    the function and issue type remain the same.
+    The fingerprint is stable across line number changes AND description
+    variations, as long as the file, function, and issue type remain the same.
     
     Args:
         file_path: Path to the file
         function_name: Name of containing function (if extracted)
         issue_type: Categorized issue type
-        description: Issue description (normalized)
+        description: Issue description (NOT used in fingerprint, only for reference)
         snippet: Code snippet around issue (optional)
         
     Returns:
         SHA256 hash fingerprint
     """
-    # Normalize description (lowercase, remove extra whitespace)
-    norm_desc = ' '.join(description.lower().split())[:200]
-    
-    # Build fingerprint components
+    # Build fingerprint from STABLE components only
+    # Do NOT include description - models phrase things differently!
     components = [
         file_path,
         function_name or "global",
         issue_type,
-        norm_desc,
     ]
     
-    # Add snippet hash if available
+    # Add snippet hash if available (code is stable)
     if snippet:
         snippet_normalized = ''.join(snippet.split())
         components.append(snippet_normalized[:500])

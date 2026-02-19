@@ -140,7 +140,6 @@ council pr-review owner/repo#123          # Review PR
 council pr-review url --rounds 2          # Multi-round
 council pr-review url --deep              # Deep analysis (imports, context)
 council pr-review url --deep --fresh      # Force fresh context fetch
-council pr-review url --newer-issues      # Only show new issues
 council architecture ./docs               # Review architecture
 council history                           # Past reviews
 council stats <session_id>                # Session details

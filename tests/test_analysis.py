@@ -365,6 +365,28 @@ const handleSubmit = async (event) => {
         
         assert fp1 == fp2
     
+    def test_generate_fingerprint_ignores_description_wording(self):
+        """Test that different description wording produces SAME fingerprint."""
+        from council.analysis.fingerprint import generate_fingerprint
+        
+        # Same issue, different wording (as models would produce)
+        fp1 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="SQL injection vulnerability in query execution",
+        )
+        
+        fp2 = generate_fingerprint(
+            file_path="auth.py",
+            function_name="login",
+            issue_type="sql_injection",
+            description="User input passed directly to SQL without sanitization",
+        )
+        
+        # Should be SAME because file + function + type are same
+        assert fp1 == fp2
+    
     def test_generate_fingerprint_different_files(self):
         """Test different files produce different fingerprints."""
         from council.analysis.fingerprint import generate_fingerprint

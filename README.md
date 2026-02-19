@@ -87,11 +87,11 @@ council pr-review owner/repo#123 --files "auth.py,utils.py"
 # Deep analysis (fetches code context)
 council pr-review owner/repo#123 --deep
 
+# Force fresh context (bypass cache)
+council pr-review owner/repo#123 --deep --fresh
+
 # Combine all options
 council pr-review owner/repo#123 --deep --rounds 2 --files "auth.py"
-
-# Only show new issues (hide carried-over from previous reviews)
-council pr-review owner/repo#123 --newer-issues
 
 # Review architecture
 council architecture ./design.mermaid
@@ -221,15 +221,14 @@ Model Council tracks issues across reviews using **fingerprinting** — issues a
 ### Example Output
 
 ```
-Issues: 2 new, 1 unresolved, 1 recurring, 1 fixed
+Issues: 3 new, 4 unresolved
 ```
 
 | Status | Meaning |
 |--------|---------|
-| **new** | First time seeing this issue |
-| **unresolved** | Same PR, issue still present |
-| **recurring** | Different PR, issue reappeared |
-| **fixed** | Issue no longer present |
+| **NEW** | First time seeing this issue |
+| **UNRESOLVED** | Same PR, issue still present |
+| **RECURRING** | Different PR, issue reappeared |
 
 ### Why Fingerprinting?
 
